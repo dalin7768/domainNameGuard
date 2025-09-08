@@ -266,12 +266,85 @@ class TelegramNotifier:
                 for result in domains:
                     clickable_url = result.url if result.url.startswith('http') else f"https://{result.domain_name}"
                     
-                    # HTTP错误显示状态码
+                    # 构建错误详情
+                    error_details = []
+                    
+                    # HTTP错误显示状态码和具体错误描述
                     if status == CheckStatus.HTTP_ERROR and result.status_code:
-                        message += f"  • [{result.domain_name}]({clickable_url}) [{result.status_code}]\n"
-                    # 超时错误显示超时时间和重试信息
+                        # 获取HTTP错误的具体描述
+                        if result.status_code == 522:
+                            error_details.append("522 连接超时")
+                        elif result.status_code == 521:
+                            error_details.append("521 Web服务器宕机")
+                        elif result.status_code == 520:
+                            error_details.append("520 未知错误")
+                        elif result.status_code == 523:
+                            error_details.append("523 源站不可达")
+                        elif result.status_code == 524:
+                            error_details.append("524 超时发生")
+                        elif result.status_code == 525:
+                            error_details.append("525 SSL握手失败")
+                        elif result.status_code == 526:
+                            error_details.append("526 无效SSL证书")
+                        elif result.status_code == 502:
+                            error_details.append("502 网关错误")
+                        elif result.status_code == 503:
+                            error_details.append("503 服务不可用")
+                        elif result.status_code == 504:
+                            error_details.append("504 网关超时")
+                        elif result.status_code == 500:
+                            error_details.append("500 服务器内部错误")
+                        elif result.status_code == 404:
+                            error_details.append("404 页面不存在")
+                        elif result.status_code == 403:
+                            error_details.append("403 禁止访问")
+                        elif result.status_code == 401:
+                            error_details.append("401 未授权")
+                        elif result.status_code == 400:
+                            error_details.append("400 错误请求")
+                        elif result.status_code == 429:
+                            error_details.append("429 请求过多")
+                        elif result.status_code == 451:
+                            error_details.append("451 法律原因不可用")
+                        else:
+                            error_details.append(f"{result.status_code}")
+                    
+                    # 钓鱼网站警告
+                    elif status == CheckStatus.PHISHING_WARNING:
+                        error_details.append("钓鱼网站")
+                    
+                    # 安全警告（爆红）
+                    elif status == CheckStatus.SECURITY_WARNING:
+                        error_details.append("安全警告/爆红")
+                    
+                    # 超时错误显示具体信息
                     elif status == CheckStatus.TIMEOUT and result.error_message:
-                        message += f"  • [{result.domain_name}]({clickable_url}) {result.error_message}\n"
+                        if "连接建立超时" in result.error_message:
+                            error_details.append("连接超时")
+                        elif "请求超时" in result.error_message:
+                            error_details.append("请求超时")
+                        else:
+                            error_details.append("超时")
+                    
+                    # SSL错误
+                    elif status == CheckStatus.SSL_ERROR:
+                        error_details.append("SSL证书错误")
+                    
+                    # DNS错误
+                    elif status == CheckStatus.DNS_ERROR:
+                        error_details.append("DNS解析失败")
+                    
+                    # 连接错误
+                    elif status == CheckStatus.CONNECTION_ERROR:
+                        error_details.append("连接失败")
+                    
+                    # WebSocket错误
+                    elif status == CheckStatus.WEBSOCKET_ERROR:
+                        error_details.append("WebSocket连接失败")
+                    
+                    # 构建最终消息
+                    if error_details:
+                        message += f"  • [{result.domain_name}]({clickable_url}) ({', '.join(error_details)})\n"
                     else:
                         message += f"  • [{result.domain_name}]({clickable_url})\n"
                 
