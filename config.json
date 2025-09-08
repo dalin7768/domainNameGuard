@@ -1,0 +1,78 @@
+{
+  "telegram": {
+    "bot_token": "7431147236:AAEHwYxVB3X54yAwdSEDSN2zWWjZ7_SaZxE",
+    "chat_id": "-1002615640122",
+    "admin_users": [
+      "@chong_qing6"
+    ]
+  },
+  "check": {
+    "interval_minutes": 60,
+    "timeout_seconds": 14,
+    "retry_count": 2,
+    "retry_delay_seconds": 5
+  },
+  "domains": [
+    "77oi.com",
+    "98platform.com",
+    "aaosbbits.com",
+    "aausbittss.com",
+    "amgalaxy.com",
+    "amparisian.com",
+    "amylif.cc",
+    "amylif.vip",
+    "ausbits38.com",
+    "ausbits58.com",
+    "ausbits68.com",
+    "ausbits88.com",
+    "aussbitte.com",
+    "axioncoins.com",
+    "baysandsmbs.net",
+    "bike399.com",
+    "binancezgzj.cc",
+    "binancezgzj.shop",
+    "blsmgt.com",
+    "boa-i.com",
+    "boa-v.com",
+    "boa-x.com",
+    "btcbbo.top",
+    "btcbboz.top",
+    "btcbbt.top",
+    "btcboadmin.top",
+    "btcboa.top",
+    "btcboc.top",
+    "btcboe.top",
+    "btcbog.top",
+    "btcboo.top",
+    "btcboox.top",
+    "btcbor.top",
+    "btcbos.top",
+    "btcboux.top",
+    "btcbox08.com",
+    "btcbox1.com",
+    "btcbox365.com",
+    "btcboxes.top",
+    "btcboxo.com",
+    "btcboxo.top",
+    "btcbozday.top",
+    "cashnest.club",
+    "cashnest.vip",
+    "cku1.vip",
+    "cmecombo.com",
+    "coinprofit6789.com",
+    "coinprooat.com",
+    "cryptoviewpro.net"
+  ],
+  "notification": {
+    "notify_on_recovery": true,
+    "notify_on_all_success": false,
+    "failure_threshold": 1,
+    "cooldown_minutes": 20
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "domain_monitor.log",
+    "max_size_mb": 10,
+    "backup_count": 5
+  }
+}
