@@ -137,7 +137,9 @@ class DomainMonitor:
             self.checker = DomainChecker(
                 timeout=check_config.get('timeout_seconds', 10),
                 retry_count=check_config.get('retry_count', 2),
-                retry_delay=check_config.get('retry_delay_seconds', 5)
+                retry_delay=check_config.get('retry_delay_seconds', 5),
+                max_concurrent=check_config.get('max_concurrent', 10),  # 使用配置的并发数
+                auto_adjust=check_config.get('auto_adjust_concurrent', True)  # 自适应并发
             )
             self.logger.info("域名检测器初始化完成")
             
@@ -190,6 +192,9 @@ class DomainMonitor:
         self.logger.info("=" * 50)
         self.logger.info(f"开始新一轮域名检查 - {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         
+        # 记录检查开始时间
+        check_start_time = datetime.now()
+        
         try:
             # 重要：每次检查前重新加载配置
             # 这样通过 Telegram 命令修改的配置会立即生效
@@ -204,77 +209,113 @@ class DomainMonitor:
             self.checker.timeout = check_config.get('timeout_seconds', 10)
             self.checker.retry_count = check_config.get('retry_count', 2)
             self.checker.retry_delay = check_config.get('retry_delay_seconds', 5)
+            self.checker.max_concurrent = check_config.get('max_concurrent', 10)
+            batch_notify = check_config.get('batch_notify', False)
+            show_eta = check_config.get('show_eta', True)
             
-            # 根据域名数量动态调整超时时间
-            interval_minutes = self.config_manager.get('check.interval_minutes', 30)
             domain_count = len(domains)
+            max_concurrent = self.checker.max_concurrent
             
-            # 计算合理的超时时间
-            if domain_count <= 10:
-                # 少量域名：使用间隔的一半，最少30秒
-                max_check_time = max(interval_minutes * 30, 30)
-            elif domain_count <= 50:
-                # 中等数量：使用间隔的80%，最少60秒
-                max_check_time = max(interval_minutes * 48, 60)
-            else:
-                # 大量域名：使用间隔的90%，但不超过5分钟
-                max_check_time = min(interval_minutes * 54, 300)
+            # 计算预估时间
+            batches = (domain_count + max_concurrent - 1) // max_concurrent
+            # 假设每批平均需要10秒（根据超时时间调整）
+            estimated_seconds = batches * (self.checker.timeout + 2)
             
-            self.logger.info(f"检查 {domain_count} 个域名，总超时时间设置为 {max_check_time} 秒")
+            # 发送开始通知，包含预估时间
+            if show_eta:
+                eta_minutes = estimated_seconds // 60
+                eta_seconds = estimated_seconds % 60
+                await self.bot.send_message(
+                    f"🔍 **开始检查域名**\n\n"
+                    f"📊 域名总数: {domain_count} 个\n"
+                    f"⚡ 并发数: {max_concurrent}\n"
+                    f"📦 批次数: {batches}\n"
+                    f"⏱️ 预计耗时: {eta_minutes}分{eta_seconds}秒\n\n"
+                    f"正在检查..."
+                )
             
-            # 定义进度回调函数，用于大量域名时发送进度通知
-            async def progress_callback(completed: int, total: int, batch: int = None, total_batches: int = None):
-                """进度回调，仅在大量域名时发送通知"""
-                # 只有超过100个域名时才发送进度通知
-                if total > 100 and completed % 100 == 0 and completed < total:
-                    if batch:
-                        msg = f"⏳ 检查进度：批次 {batch}/{total_batches} - {completed}/{total} ({(completed/total)*100:.1f}%)"
-                    else:
-                        msg = f"⏳ 检查进度：{completed}/{total} ({(completed/total)*100:.1f}%)"
+            self.logger.info(f"检查 {domain_count} 个域名，并发数 {max_concurrent}，分 {batches} 批")
+            
+            # 获取通知配置
+            notification_config = self.config_manager.get('notification', {})
+            
+            # 定义批次回调（用于分批通知）
+            all_batch_results = []  # 收集所有批次结果
+            
+            async def batch_callback(batch_results, current_batch, total_batches, eta_seconds):
+                """批次完成回调"""
+                all_batch_results.extend(batch_results)
+                
+                # 如果启用分批通知，每批完成后发送结果
+                if batch_notify:
+                    # 统计批次结果
+                    batch_success = sum(1 for r in batch_results if r.is_success)
+                    batch_failed = len(batch_results) - batch_success
                     
-                    # 异步发送进度通知
+                    eta_text = ""
+                    if eta_seconds > 0:
+                        eta_min = int(eta_seconds // 60)
+                        eta_sec = int(eta_seconds % 60)
+                        eta_text = f"\n⏱️ 剩余时间: {eta_min}分{eta_sec}秒"
+                    
+                    msg = f"📦 **批次 {current_batch}/{total_batches} 完成**\n\n"
+                    msg += f"✅ 成功: {batch_success} 个\n"
+                    msg += f"❌ 失败: {batch_failed} 个"
+                    msg += eta_text
+                    
+                    await self.bot.send_message(msg)
+                    
+                    # 立即发送该批次的告警
+                    await self.notifier.notify_failures(
+                        batch_results,
+                        failure_threshold=notification_config.get('failure_threshold', 2),
+                        notify_recovery=notification_config.get('notify_on_recovery', True),
+                        notify_all_success=False  # 批次模式不发送全部成功通知
+                    )
+            
+            # 定义进度回调
+            async def progress_callback(completed, total, eta_seconds):
+                """进度更新回调"""
+                # 每完成25%或最少50个发送一次进度
+                if completed % max(50, total // 4) == 0 and completed < total:
+                    progress_percent = (completed / total) * 100
+                    eta_text = ""
+                    if eta_seconds > 0:
+                        eta_min = int(eta_seconds // 60)
+                        eta_sec = int(eta_seconds % 60)
+                        eta_text = f" - 剩余: {eta_min}分{eta_sec}秒"
+                    
+                    msg = f"⏳ 进度: {completed}/{total} ({progress_percent:.1f}%){eta_text}"
                     try:
                         await self.bot.send_message(msg)
                     except Exception as e:
                         self.logger.error(f"发送进度通知失败：{e}")
             
-            try:
-                # 自动选择并发数（让 check_domains 智能决定）
-                results = await asyncio.wait_for(
-                    self.checker.check_domains(
-                        domains, 
-                        max_concurrent=None,  # 让系统自动计算
-                        progress_callback=progress_callback if domain_count > 100 else None
-                    ),
-                    timeout=max_check_time
-                )
-            except asyncio.TimeoutError:
-                self.logger.error(f"域名检查超过最大时间限制 {max_check_time} 秒，强制结束")
-                # 为所有域名创建超时结果
-                results = [
-                    CheckResult(
-                        domain_name=domain,
-                        url=domain if domain.startswith('http') else f'https://{domain}',
-                        status=CheckStatus.TIMEOUT,
-                        error_message=f"检查超时（总时限 {max_check_time} 秒）"
-                    )
-                    for domain in domains
-                ]
+            # 执行批处理检查
+            results = await self.checker.check_domains_batch(
+                domains,
+                batch_callback=batch_callback if batch_notify else None,
+                progress_callback=progress_callback if show_eta and domain_count > 50 else None
+            )
+            
+            # 计算实际耗时
+            actual_duration = (datetime.now() - check_start_time).total_seconds()
+            self.logger.info(f"域名检查完成，实际耗时: {actual_duration:.1f} 秒")
             
             # 动态更新通知器参数
-            notification_config = self.config_manager.get('notification', {})
             self.notifier.cooldown_minutes = notification_config.get('cooldown_minutes', 60)
             
-            # 根据配置发送通知
-            # failure_threshold: 连续失败N次才告警
-            # notify_on_recovery: 是否发送恢复通知
-            # notify_on_all_success: 是否在全部正常时通知
-            await self.notifier.notify_failures(
-                results,
-                failure_threshold=notification_config.get('failure_threshold', 2),
-                notify_recovery=notification_config.get('notify_on_recovery', True),
-                notify_all_success=notification_config.get('notify_on_all_success', True)  # 默认总是发送汇总
-            )
+            # 如果不是批次通知模式，或需要最终汇总，发送总体通知
+            if not batch_notify:
+                await self.notifier.notify_failures(
+                    results,
+                    failure_threshold=notification_config.get('failure_threshold', 2),
+                    notify_recovery=notification_config.get('notify_on_recovery', True),
+                    notify_all_success=notification_config.get('notify_on_all_success', True)
+                )
+            else:
+                # 批次模式下只发送最终汇总
+                await self.notifier._send_check_summary(results, True)
             
             # 输出统计信息
             success_count = sum(1 for r in results if r.is_success)
@@ -296,20 +337,56 @@ class DomainMonitor:
     async def schedule_checks(self) -> None:
         """定时执行域名检查
         
-        按照配置的间隔时间循环执行检查
-        每次循环会重新读取间隔时间，支持动态调整
+        使用 interval_minutes 作为最大循环时间：
+        - 如果检查在 interval_minutes 内完成，等待剩余时间
+        - 如果检查超过 interval_minutes，立即开始下一轮
         """
         while self.is_running:
             try:
-                # 动态获取检查间隔，允许通过命令修改
-                interval_minutes = self.config_manager.get('check.interval_minutes', 30)
+                # 记录循环开始时间
+                cycle_start = datetime.now()
                 
-                # 等待指定时间（转换为秒）
-                await asyncio.sleep(interval_minutes * 60)
+                # 动态获取最大循环时间
+                max_cycle_minutes = self.config_manager.get('check.interval_minutes', 30)
+                max_cycle_seconds = max_cycle_minutes * 60
                 
-                # 只在程序仍在运行时执行检查
+                self.logger.info(f"开始新的检查循环，最大循环时间: {max_cycle_minutes} 分钟")
+                
+                # 执行检查
                 if self.is_running:
                     self.check_task = asyncio.create_task(self.run_check())
+                    # 等待检查完成
+                    try:
+                        await self.check_task
+                    except Exception as e:
+                        self.logger.error(f"域名检查出错: {e}")
+                
+                # 计算已用时间
+                elapsed_seconds = (datetime.now() - cycle_start).total_seconds()
+                
+                # 如果还有剩余时间，等待
+                if elapsed_seconds < max_cycle_seconds:
+                    wait_seconds = max_cycle_seconds - elapsed_seconds
+                    wait_minutes = int(wait_seconds // 60)
+                    wait_secs = int(wait_seconds % 60)
+                    
+                    self.logger.info(f"本轮检查用时 {elapsed_seconds:.1f} 秒，等待 {wait_minutes} 分 {wait_secs} 秒后开始下一轮")
+                    
+                    # 发送等待通知
+                    if self.bot:
+                        await self.bot.send_message(
+                            f"⏰ 下次检查将在 {wait_minutes} 分 {wait_secs} 秒后开始"
+                        )
+                    
+                    await asyncio.sleep(wait_seconds)
+                else:
+                    # 检查时间超过了最大循环时间，立即开始下一轮
+                    self.logger.warning(f"检查用时 {elapsed_seconds:.1f} 秒，超过最大循环时间 {max_cycle_seconds} 秒，立即开始下一轮")
+                    
+                    if self.bot:
+                        await self.bot.send_message(
+                            f"⚠️ 检查耗时超过设定的 {max_cycle_minutes} 分钟，立即开始下一轮检查"
+                        )
                     
             except asyncio.CancelledError:
                 break
@@ -493,25 +570,21 @@ class DomainMonitor:
         self.bot_task = asyncio.create_task(self.bot.listen_for_commands())
         self.logger.info("Telegram Bot 命令监听已启动")
         
-        # 启动定时检查任务
-        interval = self.config_manager.get('check.interval_minutes', 30)
-        self.current_interval = interval  # 初始化当前间隔时间
-        self.logger.info(f"定时检查已启动，每 {interval} 分钟执行一次")
-        self.schedule_task = asyncio.create_task(self.schedule_checks())
-        
         # 发送启动通知
         domains = self.config_manager.get_domains()
+        interval = self.config_manager.get('check.interval_minutes', 30)
+        self.current_interval = interval  # 初始化当前间隔时间
+        
         await self.bot.send_message(
             f"🚀 **域名监控服务已启动**\n\n"
             f"🌐 监控域名数: {len(domains)} 个\n"
-            f"⏰ 检查间隔: {interval} 分钟\n\n"
+            f"⏰ 最大循环时间: {interval} 分钟\n\n"
             f"使用 /help 查看所有命令"
         )
         
-        # 自动执行首次检查
-        self.logger.info("执行首次域名检查...")
-        await asyncio.sleep(1)  # 稍微延迟以确保启动消息已发送
-        await self.run_check()
+        # 启动定时检查任务（包含首次检查）
+        self.logger.info(f"定时检查已启动，最大循环时间 {interval} 分钟")
+        self.schedule_task = asyncio.create_task(self.schedule_checks())
         
         print("\n监控服务正在运行中...")
         print("可以在 Telegram 群组中使用 /help 查看所有命令")

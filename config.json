@@ -8,9 +8,13 @@
   },
   "check": {
     "interval_minutes": 60,
+    "max_concurrent": 10,
+    "auto_adjust_concurrent": true,
     "timeout_seconds": 14,
     "retry_count": 2,
-    "retry_delay_seconds": 5
+    "retry_delay_seconds": 5,
+    "batch_notify": false,
+    "show_eta": true
   },
   "domains": [
     "77oi.com",

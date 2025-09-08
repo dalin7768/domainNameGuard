@@ -177,7 +177,7 @@ class TelegramNotifier:
                              notify_recovery: bool = True,
                              notify_all_success: bool = False) -> None:
         """
-        通知检查结果
+        通知检查结果（简化版，只发送汇总）
         
         Args:
             results: 检查结果列表
@@ -185,46 +185,18 @@ class TelegramNotifier:
             notify_recovery: 是否通知恢复
             notify_all_success: 是否在全部正常时通知
         """
-        # 先发送检查完成汇总通知
-        await self._send_check_summary(results, notify_all_success)
-        
-        # 收集需要发送告警的域名（按错误类型分组）
-        error_groups = defaultdict(list)  # 按错误类型分组
-        recovery_domains = []  # 需要发送恢复通知的域名
-        
-        # 处理各个域名的结果
+        # 更新失败计数（用于内部跟踪）
         for result in results:
             if result.is_success:
-                # 域名正常，检查是否需要发送恢复通知
-                if result.url in self.failure_count and self.failure_count[result.url] >= failure_threshold:
-                    if notify_recovery:
-                        recovery_domains.append(result)
-                        self.logger.info(f"域名 {result.domain_name} 已恢复")
-                
-                # 重置失败计数
                 self.failure_count[result.url] = 0
-                
             else:
-                # 域名异常，增加失败计数
                 self.failure_count[result.url] = self.failure_count.get(result.url, 0) + 1
-                
-                # 检查是否应该发送通知
-                if self._should_notify(result.url, failure_threshold):
-                    # 按错误类型分组
-                    error_groups[result.status].append(result)
-                    # 更新最后通知时间
-                    self.last_notification_time[result.url] = datetime.now()
         
-        # 发送恢复通知（如果有）
-        if recovery_domains:
-            await self._send_grouped_recovery_message(recovery_domains)
-        
-        # 发送分组的错误通知
-        if error_groups:
-            await self._send_grouped_error_messages(error_groups)
+        # 发送统一的检查完成通知（包含所有信息）
+        await self._send_check_summary(results, notify_all_success)
     
     async def _send_check_summary(self, results: List[CheckResult], notify_all_success: bool) -> None:
-        """发送检查汇总通知
+        """发送检查汇总通知（优化版，按错误类型分组）
         
         Args:
             results: 检查结果列表  
@@ -252,35 +224,46 @@ class TelegramNotifier:
             message += f"🌟 全部正常运行\n"
             message += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
         else:
-            # 有异常域名
-            message = f"⚠️ **检查完成**\n\n"
-            message += f"🔍 已检查 **{total_count}** 个域名\n"
-            message += f"✅ **{success_count}** 个正常\n"
+            # 有异常域名，按错误类型分组
+            error_groups = defaultdict(list)
+            for result in results:
+                if not result.is_success:
+                    error_groups[result.status].append(result)
             
-            if failed_count > 0:
-                message += f"❌ **{failed_count}** 个异常\n\n"
-                message += f"🔴 **异常域名**：\n"
+            message = f"⚠️ **域名检查完成**\n\n"
+            message += f"📊 **统计信息**\n"
+            message += f"🔍 检查总数: {total_count} 个\n"
+            message += f"✅ 正常: {success_count} 个\n"
+            message += f"❌ 异常: {failed_count} 个\n\n"
+            
+            # 按错误类型显示
+            error_names = {
+                CheckStatus.DNS_ERROR: ("🔍", "DNS解析错误"),
+                CheckStatus.CONNECTION_ERROR: ("🔌", "连接失败"),
+                CheckStatus.TIMEOUT: ("⏱️", "请求超时"),
+                CheckStatus.HTTP_ERROR: ("❌", "HTTP错误"),
+                CheckStatus.SSL_ERROR: ("🔒", "SSL证书错误"),
+                CheckStatus.UNKNOWN_ERROR: ("❓", "其他错误")
+            }
+            
+            for status, domains in error_groups.items():
+                emoji, name = error_names.get(status, ("⚠️", "错误"))
+                message += f"**{emoji} {name} ({len(domains)}个):**\n"
                 
-                # 列出异常域名
-                for result in results:
-                    if not result.is_success:
-                        # 简化错误信息
-                        error_type = {
-                            CheckStatus.DNS_ERROR: "DNS错误",
-                            CheckStatus.CONNECTION_ERROR: "连接失败",
-                            CheckStatus.TIMEOUT: "超时",
-                            CheckStatus.HTTP_ERROR: f"HTTP {result.status_code}",
-                            CheckStatus.SSL_ERROR: "SSL错误",
-                            CheckStatus.UNKNOWN_ERROR: "未知错误"
-                        }.get(result.status, "错误")
-                        
-                        # 构建可点击的URL
-                        clickable_url = result.url if result.url.startswith('http') else f"https://{result.domain_name}"
-                        
-                        # 使用Markdown格式创建可点击链接
-                        message += f"  • [{result.domain_name}]({clickable_url}) - {error_type}\n"
+                # 显示所有域名
+                for result in domains:
+                    clickable_url = result.url if result.url.startswith('http') else f"https://{result.domain_name}"
+                    
+                    # HTTP错误显示状态码
+                    if status == CheckStatus.HTTP_ERROR and result.status_code:
+                        message += f"  • [{result.domain_name}]({clickable_url}) [{result.status_code}]\n"
+                    else:
+                        message += f"  • [{result.domain_name}]({clickable_url})\n"
+                
+                message += "\n"
             
-            message += f"\n⏰ {datetime.now().strftime('%H:%M:%S')}"
+            # 添加时间戳
+            message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         
         # 发送汇总消息
         success = await self.send_message(message)
