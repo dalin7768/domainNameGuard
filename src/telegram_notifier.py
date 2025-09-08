@@ -175,7 +175,8 @@ class TelegramNotifier:
                              results: List[CheckResult], 
                              failure_threshold: int = 2,
                              notify_recovery: bool = True,
-                             notify_all_success: bool = False) -> None:
+                             notify_all_success: bool = False,
+                             next_run_time: Optional[datetime] = None) -> None:
         """
         通知检查结果（简化版，只发送汇总）
         
@@ -193,9 +194,9 @@ class TelegramNotifier:
                 self.failure_count[result.url] = self.failure_count.get(result.url, 0) + 1
         
         # 发送统一的检查完成通知（包含所有信息）
-        await self._send_check_summary(results, notify_all_success)
+        await self._send_check_summary(results, notify_all_success, next_run_time=next_run_time)
     
-    async def _send_check_summary(self, results: List[CheckResult], notify_all_success: bool) -> None:
+    async def _send_check_summary(self, results: List[CheckResult], notify_all_success: bool, next_run_time: Optional[datetime] = None) -> None:
         """发送检查汇总通知（优化版，按错误类型分组）
         
         Args:
@@ -222,7 +223,18 @@ class TelegramNotifier:
             message = f"✅ **检查完成**\n\n"
             message += f"🔍 已检查 **{total_count}** 个域名\n"
             message += f"🌟 全部正常运行\n"
-            message += f"⏰ {datetime.now().strftime('%H:%M:%S')}"
+            message += f"⏰ {datetime.now().strftime('%H:%M:%S')}\n\n"
+            
+            # 添加下次执行时间
+            if next_run_time:
+                time_diff = (next_run_time - datetime.now()).total_seconds()
+                if time_diff > 0:
+                    minutes = int(time_diff // 60)
+                    seconds = int(time_diff % 60)
+                    message += f"⏰ 下次检查将在 {minutes} 分 {seconds} 秒后开始\n"
+                    message += f"📅 具体时间: {next_run_time.strftime('%H:%M:%S')}"
+                else:
+                    message += f"⏰ 下次检查将立即开始"
         else:
             # 有异常域名，按错误类型分组
             error_groups = defaultdict(list)
@@ -266,7 +278,18 @@ class TelegramNotifier:
                 message += "\n"
             
             # 添加时间戳
-            message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            
+            # 添加下次执行时间
+            if next_run_time:
+                time_diff = (next_run_time - datetime.now()).total_seconds()
+                if time_diff > 0:
+                    minutes = int(time_diff // 60)
+                    seconds = int(time_diff % 60)
+                    message += f"⏰ 下次检查将在 {minutes} 分 {seconds} 秒后开始\n"
+                    message += f"📅 具体时间: {next_run_time.strftime('%H:%M:%S')}"
+                else:
+                    message += f"⏰ 下次检查将立即开始"
         
         # 发送汇总消息
         success = await self.send_message(message)

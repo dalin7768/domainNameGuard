@@ -13,7 +13,7 @@ import logging.handlers
 import sys
 import signal
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 import time
 from typing import Optional
 
@@ -312,17 +312,30 @@ class DomainMonitor:
             # 动态更新通知器参数
             self.notifier.cooldown_minutes = notification_config.get('cooldown_minutes', 60)
             
+            # 计算下次执行时间
+            max_cycle_minutes = self.config_manager.get('check.interval_minutes', 30)
+            max_cycle_seconds = max_cycle_minutes * 60
+            elapsed = (datetime.now() - check_start_time).total_seconds()
+            
+            # 计算下次执行的具体时间
+            if elapsed < max_cycle_seconds:
+                wait_seconds = max_cycle_seconds - elapsed
+                next_run_time = datetime.now() + timedelta(seconds=wait_seconds)
+            else:
+                next_run_time = datetime.now()  # 立即执行
+            
             # 如果不是批次通知模式，或需要最终汇总，发送总体通知
             if not batch_notify:
                 await self.notifier.notify_failures(
                     results,
                     failure_threshold=notification_config.get('failure_threshold', 2),
                     notify_recovery=notification_config.get('notify_on_recovery', True),
-                    notify_all_success=notification_config.get('notify_on_all_success', True)
+                    notify_all_success=notification_config.get('notify_on_all_success', True),
+                    next_run_time=next_run_time
                 )
             else:
                 # 批次模式下只发送最终汇总
-                await self.notifier._send_check_summary(results, True)
+                await self.notifier._send_check_summary(results, True, next_run_time=next_run_time)
             
             # 输出统计信息
             success_count = sum(1 for r in results if r.is_success)
@@ -379,12 +392,7 @@ class DomainMonitor:
                     
                     self.logger.info(f"本轮检查用时 {elapsed_seconds:.1f} 秒，等待 {wait_minutes} 分 {wait_secs} 秒后开始下一轮")
                     
-                    # 发送等待通知
-                    if self.bot:
-                        await self.bot.send_message(
-                            f"⏰ 下次检查将在 {wait_minutes} 分 {wait_secs} 秒后开始"
-                        )
-                    
+                    # 不再单独发送等待通知（已合并到检查完成消息中）
                     await asyncio.sleep(wait_seconds)
                 else:
                     # 检查时间超过了最大循环时间，立即开始下一轮

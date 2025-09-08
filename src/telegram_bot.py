@@ -273,6 +273,7 @@ class TelegramBot:
 🔍 **监控控制**:
 `/check` - 立即执行域名检查
 `/reload` - 重新加载配置文件
+`/restart` - 重启监控服务
 `/stop` - 停止监控服务
 
 ⚙️ **配置管理**:
