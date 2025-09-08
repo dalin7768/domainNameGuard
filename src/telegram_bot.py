@@ -51,10 +51,12 @@ class TelegramBot:
             '/interval': self.cmd_set_interval,
             '/timeout': self.cmd_set_timeout,
             '/retry': self.cmd_set_retry,
+            '/concurrent': self.cmd_set_concurrent,
             '/threshold': self.cmd_set_threshold,
             '/cooldown': self.cmd_set_cooldown,
             '/recovery': self.cmd_toggle_recovery,
             '/allsuccess': self.cmd_toggle_all_success,
+            '/autoadjust': self.cmd_toggle_autoadjust,
             '/admin': self.cmd_admin,
             '/stop': self.cmd_stop,
             '/restart': self.cmd_restart,
@@ -262,7 +264,7 @@ class TelegramBot:
 `/start` - 开始使用机器人
 `/status` - 查看监控状态
 
-📝 **域名管理**:
+📝 **域名管理** *(热更新)*:
 `/list` - 查看所有监控域名
 `/add example.com` - 添加域名（支持批量）
 `/remove example.com` - 删除域名（支持批量）
@@ -275,15 +277,17 @@ class TelegramBot:
 
 ⚙️ **配置管理**:
 `/config` - 显示当前配置
-`/interval 10` - 设置检查间隔(分钟)
-`/timeout 15` - 设置超时时间(秒)
-`/retry 3` - 设置重试次数
-`/threshold 3` - 设置失败阈值
-`/cooldown 30` - 设置通知冷却时间(分钟)
-`/recovery` - 切换恢复通知开关
-`/allsuccess` - 切换全部正常时通知开关
+`/interval 10` - 设置检查间隔 *(热更新)*
+`/timeout 15` - 设置超时时间 *(热更新)*
+`/retry 3` - 设置重试次数 *(热更新)*
+`/concurrent 20` - 设置并发线程数 *(热更新)*
+`/threshold 3` - 设置失败阈值 *(热更新)*
+`/cooldown 30` - 设置通知冷却时间 *(热更新)*
+`/recovery` - 切换恢复通知 *(热更新)*
+`/allsuccess` - 切换全部正常通知 *(热更新)*
+`/autoadjust` - 切换自适应并发 *(热更新)*
 
-👥 **管理员设置**:
+👥 **管理员设置** *(需重启)*:
 `/admin list` - 查看管理员列表
 `/admin add 123456` - 添加管理员
 `/admin remove 123456` - 删除管理员
@@ -293,6 +297,8 @@ class TelegramBot:
 `/remove site1.com site2.com`
 
 💡 **提示**:
+• 标记 *(热更新)* 的配置立即生效
+• 标记 *(需重启)* 的配置需要重启服务
 • 域名不需要添加 http:// 前缀
 • 支持空格或逗号分隔多个域名
 • 部分命令需要管理员权限"""
@@ -544,6 +550,24 @@ class TelegramBot:
         except ValueError:
             await self.send_message("❌ 请输入有效的数字", reply_to=msg_id)
     
+    async def cmd_set_concurrent(self, args: str, msg_id: int, user_id: int, username: str):
+        """设置并发线程数"""
+        if not args:
+            await self.send_message("❌ 请提供并发数\n\n示例: `/concurrent 20`", reply_to=msg_id)
+            return
+        
+        try:
+            concurrent = int(args.strip())
+            if concurrent < 1 or concurrent > 100:
+                await self.send_message("❌ 并发数必须在 1-100 之间", reply_to=msg_id)
+                return
+            
+            self.config_manager.set('check.max_concurrent', concurrent)
+            self.config_manager.save_config()
+            await self.send_message(f"✅ 并发线程数已设置为: {concurrent}", reply_to=msg_id)
+        except ValueError:
+            await self.send_message("❌ 请输入有效的数字", reply_to=msg_id)
+    
     async def cmd_set_threshold(self, args: str, msg_id: int, user_id: int, username: str):
         """设置失败阈值"""
         if not args:
@@ -595,6 +619,16 @@ class TelegramBot:
             await self.send_message(f"✅ {message}", reply_to=msg_id)
         else:
             await self.send_message(f"❌ {message}", reply_to=msg_id)
+    
+    async def cmd_toggle_autoadjust(self, args: str, msg_id: int, user_id: int, username: str):
+        """切换自适应并发"""
+        current = self.config_manager.get('check.auto_adjust_concurrent', True)
+        new_value = not current
+        self.config_manager.set('check.auto_adjust_concurrent', new_value)
+        self.config_manager.save_config()
+        
+        status = "开启" if new_value else "关闭"
+        await self.send_message(f"✅ 自适应并发已{status}", reply_to=msg_id)
     
     async def cmd_admin(self, args: str, msg_id: int, user_id: int, username: str):
         """管理员命令"""

@@ -523,6 +523,8 @@ class ConfigManager:
             interval = self.config['check']['interval_minutes']
             timeout = self.config['check']['timeout_seconds']
             retry = self.config['check']['retry_count']
+            concurrent = self.config['check'].get('max_concurrent', 10)
+            auto_adjust = "开启" if self.config['check'].get('auto_adjust_concurrent', True) else "关闭"
             threshold = self.config['notification']['failure_threshold']
             cooldown = self.config['notification']['cooldown_minutes']
             recovery = "开启" if self.config['notification']['notify_on_recovery'] else "关闭"
@@ -535,6 +537,8 @@ class ConfigManager:
 ⏰ **检查间隔**: {interval} 分钟
 ⏱️ **超时时间**: {timeout} 秒
 🔁 **重试次数**: {retry} 次
+⚡ **并发线程**: {concurrent} 个
+🎯 **自适应并发**: {auto_adjust}
 ⚠️ **失败阈值**: {threshold} 次
 ❄️ **冷却时间**: {cooldown} 分钟
 ✅ **恢复通知**: {recovery}
