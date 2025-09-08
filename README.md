@@ -54,9 +54,17 @@ python src/main.py
 ```
 
 #### 生产环境
-- **Linux**: `sudo deployment/deploy.sh systemd`
-- **Docker**: `docker-compose -f deployment/docker-compose.yml up -d`
-- **Windows**: `deployment\run_production.bat`
+
+**Linux一键部署：**
+```bash
+chmod +x deploy.sh
+./deploy.sh
+```
+
+**Windows一键部署：**
+```batch
+deploy.bat
+```
 
 ## 📁 项目结构
 
@@ -68,21 +76,18 @@ domain-monitor/
 │   ├── telegram_bot.py    # Telegram机器人模块
 │   ├── telegram_notifier.py # 通知发送模块
 │   └── config_manager.py  # 配置管理模块
-├── deployment/            # 部署相关文件
-│   ├── docker-compose.yml # Docker配置
-│   ├── Dockerfile         # Docker镜像
-│   ├── domain-monitor.service # systemd服务
-│   ├── deploy.sh          # Linux部署脚本
-│   ├── run_production.bat # Windows启动脚本
-│   └── ecosystem.config.js # PM2配置
-├── scripts/              # 实用脚本
-│   └── install_deps.bat # 依赖安装脚本
-├── docs/                 # 文档
-│   ├── CONFIG_GUIDE.md  # 配置指南
-│   └── OPTIMIZATION.md  # 优化说明
-├── config.json          # 配置文件（需创建）
-├── config_example.json  # 配置示例
-└── requirements.txt     # Python依赖
+├── docs/                   # 文档
+│   ├── CONFIG_GUIDE.md    # 配置指南
+│   └── OPTIMIZATION.md    # 优化说明
+├── scripts/                # 工具脚本
+│   ├── install_deps.bat   # Windows依赖安装
+│   └── clean_logs.bat     # Windows日志清理
+├── deploy.sh              # Linux一键部署脚本
+├── deploy.bat             # Windows一键部署脚本
+├── config.json            # 配置文件（需创建）
+├── config_example.json    # 配置示例
+├── requirements.txt       # Python依赖
+└── README.md             # 本文档
 ```
 
 ## 🤖 Telegram 机器人命令

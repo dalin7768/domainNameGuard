@@ -204,6 +204,12 @@ class DomainMonitor:
                 self.logger.warning("没有配置监控域名")
                 return
             
+            # 去除重复域名并记录
+            unique_domains = list(dict.fromkeys(domains))  # 保持顺序的去重
+            if len(unique_domains) != len(domains):
+                self.logger.warning(f"发现重复域名，原始数量: {len(domains)}，去重后: {len(unique_domains)}")
+                domains = unique_domains
+            
             # 动态更新检查器参数
             check_config = self.config_manager.get('check', {})
             self.checker.timeout = check_config.get('timeout_seconds', 10)

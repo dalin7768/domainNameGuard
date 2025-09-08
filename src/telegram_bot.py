@@ -348,7 +348,13 @@ class TelegramBot:
             )
             return
         
+        # 检查重复域名
+        unique_domains = list(dict.fromkeys(domains))
+        has_duplicates = len(domains) != len(unique_domains)
+        
         domain_list = "\n".join([f"{i+1}. `{domain}`" for i, domain in enumerate(domains)])
+        
+        # 构建消息
         text = f"""📝 **监控域名列表** ({len(domains)} 个)
 
 {domain_list}
@@ -357,6 +363,12 @@ class TelegramBot:
 `/add example.com` - 添加更多
 `/remove example.com` - 删除域名
 `/check` - 立即检查所有域名"""
+        
+        # 如果有重复，添加提示
+        if has_duplicates:
+            duplicate_count = len(domains) - len(unique_domains)
+            text += f"\n\n⚠️ **发现 {duplicate_count} 个重复域名**"
+            text += f"\n实际唯一域名数: {len(unique_domains)} 个"
         
         await self.send_message(text, reply_to=msg_id)
     
