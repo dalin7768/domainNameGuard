@@ -257,6 +257,9 @@ class TelegramNotifier:
                     # HTTP错误显示状态码
                     if status == CheckStatus.HTTP_ERROR and result.status_code:
                         message += f"  • [{result.domain_name}]({clickable_url}) [{result.status_code}]\n"
+                    # 超时错误显示超时时间和重试信息
+                    elif status == CheckStatus.TIMEOUT and result.error_message:
+                        message += f"  • [{result.domain_name}]({clickable_url}) {result.error_message}\n"
                     else:
                         message += f"  • [{result.domain_name}]({clickable_url})\n"
                 
