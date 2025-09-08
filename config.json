@@ -7,7 +7,7 @@
     ]
   },
   "check": {
-    "interval_minutes": 60,
+    "interval_minutes": 1,
     "max_concurrent": 10,
     "auto_adjust_concurrent": true,
     "timeout_seconds": 14,

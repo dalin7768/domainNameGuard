@@ -34,6 +34,9 @@ class TelegramBot:
         self.executing_commands = set()  # 存储正在执行的命令类型
         self.command_tasks = {}  # 存储命令任务引用
         
+        # 运行标志
+        self.is_running = True
+        
         # 命令处理器映射
         self.commands: Dict[str, Callable] = {
             '/help': self.cmd_help,
@@ -633,6 +636,8 @@ class TelegramBot:
         """停止监控"""
         if self.stop_callback:
             await self.send_message("⏹️ 正在停止监控服务...", reply_to=msg_id)
+            # 设置停止标志，结束监听循环
+            self.is_running = False
             # 调用停止回调，传递send_notification=False避免重复发送消息
             await self.stop_callback(send_notification=False)
             await self.send_message("⏹️ 监控服务已停止", reply_to=msg_id)
@@ -660,7 +665,7 @@ class TelegramBot:
         """监听命令的主循环"""
         self.logger.info("开始监听 Telegram 命令")
         
-        while True:
+        while self.is_running:  # 检查运行标志
             try:
                 updates = await self.get_updates()
                 for update in updates:
@@ -672,3 +677,5 @@ class TelegramBot:
             except Exception as e:
                 self.logger.error(f"监听命令时出错: {e}")
                 await asyncio.sleep(5)
+        
+        self.logger.info("Telegram 命令监听已停止")

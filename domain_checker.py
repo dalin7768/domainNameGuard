@@ -247,6 +247,7 @@ class DomainChecker:
                 )
             else:
                 self.logger.warning(f"域名 {name} ({url}) 状态码异常：{response.status_code}")
+                # HTTP错误通常是服务器配置问题，不重试
                 return CheckResult(
                     domain_name=name,
                     url=url,
@@ -278,7 +279,7 @@ class DomainChecker:
                 domain_name=name,
                 url=url,
                 status=CheckStatus.TIMEOUT,
-                error_message=f"请求超时（{timeout}秒）"
+                error_message=f"请求超时（{timeout}秒，未重试）"
             )
             
         except httpx.ConnectTimeout:
@@ -287,7 +288,7 @@ class DomainChecker:
                 domain_name=name,
                 url=url,
                 status=CheckStatus.TIMEOUT,
-                error_message="连接建立超时"
+                error_message=f"连接建立超时（{timeout}秒，未重试）"
             )
             
         except Exception as e:
@@ -357,6 +358,7 @@ class DomainChecker:
                 )
             else:
                 self.logger.warning(f"域名 {name} ({url}) 状态码异常：{response.status_code}")
+                # HTTP错误通常是服务器配置问题，不重试
                 return CheckResult(
                     domain_name=name,
                     url=url,
@@ -404,11 +406,13 @@ class DomainChecker:
                 await asyncio.sleep(retry_delay)
                 return await self.check_single_domain(url, retry_attempt + 1, quick_mode)
             
+            # 构建详细的超时错误信息
+            retry_info = f"" if retry_attempt == 0 else f"，已重试{retry_attempt}次"
             return CheckResult(
                 domain_name=name,
                 url=url,
                 status=CheckStatus.TIMEOUT,
-                error_message=f"请求超时（{timeout}秒）"
+                error_message=f"请求超时（{timeout}秒{retry_info}）"
             )
             
         except httpx.ConnectTimeout:
@@ -419,11 +423,13 @@ class DomainChecker:
                 await asyncio.sleep(retry_delay)
                 return await self.check_single_domain(url, retry_attempt + 1, quick_mode)
             
+            # 构建详细的超时错误信息
+            retry_info = f"" if retry_attempt == 0 else f"，已重试{retry_attempt}次"
             return CheckResult(
                 domain_name=name,
                 url=url,
                 status=CheckStatus.TIMEOUT,
-                error_message="连接建立超时"
+                error_message=f"连接建立超时（{timeout}秒{retry_info}）"
             )
             
         except Exception as e:
@@ -528,34 +534,36 @@ class DomainChecker:
             
             # 收集需要重试的URL
             retry_needed = []
-            batch_results = []
+            batch_results = list(first_results)  # 直接复制所有结果，避免索引问题
             
             for i, result in enumerate(first_results):
                 if result.status in [CheckStatus.TIMEOUT, CheckStatus.CONNECTION_ERROR]:
                     # 只对超时和连接错误进行重试
                     retry_needed.append((batch_urls[i], i))
-                    batch_results.append(None)  # 占位
-                else:
-                    batch_results.append(result)
             
             # 如果有需要重试的，进行重试（不阻塞，使用相同的并发限制）
             if retry_needed and self.retry_count > 0:
                 self.logger.info(f"第 {current_batch} 批有 {len(retry_needed)} 个域名需要重试")
                 
                 # 短暂延迟后重试
-                await asyncio.sleep(2)
+                await asyncio.sleep(self.retry_delay)
+                
+                # 对需要重试的域名进行第二次尝试
+                retry_semaphore = asyncio.Semaphore(min(len(retry_needed), self.max_concurrent))
+                
+                async def retry_with_semaphore(url: str) -> CheckResult:
+                    async with retry_semaphore:
+                        return await self.check_single_domain(url, retry_attempt=1, quick_mode=quick_mode)
                 
                 retry_tasks = []
-                for url, idx in retry_needed:
-                    retry_tasks.append((idx, asyncio.create_task(check_with_semaphore(url))))
+                for url, original_idx in retry_needed:
+                    retry_tasks.append((original_idx, asyncio.create_task(retry_with_semaphore(url))))
                 
-                # 执行重试
-                for idx, task in retry_tasks:
+                # 执行重试并更新结果
+                for original_idx, task in retry_tasks:
                     retry_result = await task
-                    batch_results[idx] = retry_result
-            
-            # 确保所有结果都已填充
-            batch_results = [r for r in batch_results if r is not None]
+                    # 更新原始位置的结果
+                    batch_results[original_idx] = retry_result
             
             # 更新结果
             all_results.extend(batch_results)
