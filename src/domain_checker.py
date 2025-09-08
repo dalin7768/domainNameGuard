@@ -7,6 +7,8 @@ import logging
 from dataclasses import dataclass
 from enum import Enum
 import gc
+import websockets
+import ssl
 
 # 尝试导入psutil，如果没有安装则禁用自适应功能
 try:
@@ -24,6 +26,9 @@ class CheckStatus(Enum):
     TIMEOUT = "timeout"
     HTTP_ERROR = "http_error"
     SSL_ERROR = "ssl_error"
+    WEBSOCKET_ERROR = "websocket_error"
+    PHISHING_WARNING = "phishing_warning"
+    SECURITY_WARNING = "security_warning"
     UNKNOWN_ERROR = "unknown_error"
 
 
@@ -52,8 +57,11 @@ class CheckResult:
             CheckStatus.DNS_ERROR: "DNS 解析失败：无法解析域名地址",
             CheckStatus.CONNECTION_ERROR: "连接错误：无法建立与服务器的连接",
             CheckStatus.TIMEOUT: f"请求超时：服务器响应时间过长",
-            CheckStatus.HTTP_ERROR: f"HTTP 错误：状态码 {self.status_code}",
+            CheckStatus.HTTP_ERROR: self._get_http_error_description(),
             CheckStatus.SSL_ERROR: "SSL 证书错误：证书验证失败或已过期",
+            CheckStatus.WEBSOCKET_ERROR: "WebSocket 连接失败：无法建立 WebSocket 连接",
+            CheckStatus.PHISHING_WARNING: "⚠️ 安全警告：该网站可能是钓鱼网站或存在安全风险",
+            CheckStatus.SECURITY_WARNING: "⚠️ 浏览器安全警告：该网站被标记为不安全（可能被Google等浏览器拦截）",
             CheckStatus.UNKNOWN_ERROR: "未知错误：请检查日志了解详情"
         }
         
@@ -61,6 +69,43 @@ class CheckResult:
         if self.error_message:
             return f"{base_desc}\n详细信息：{self.error_message}"
         return base_desc
+    
+    def _get_http_error_description(self) -> str:
+        """根据HTTP状态码返回详细错误描述"""
+        if not self.status_code:
+            return "HTTP 错误：未知状态码"
+        
+        # 详细的HTTP错误映射
+        http_errors = {
+            400: "错误请求（400）：服务器无法理解请求",
+            401: "未授权（401）：需要身份验证",
+            403: "禁止访问（403）：服务器拒绝请求",
+            404: "页面不存在（404）：请求的资源未找到",
+            405: "方法不允许（405）：请求方法不被允许",
+            408: "请求超时（408）：服务器等待请求超时",
+            429: "请求过多（429）：触发了速率限制",
+            500: "服务器内部错误（500）：服务器遇到错误",
+            502: "网关错误（502）：上游服务器错误响应",
+            503: "服务不可用（503）：服务器暂时无法处理请求",
+            504: "网关超时（504）：上游服务器响应超时",
+            520: "Web服务器返回未知错误（520）：源站返回空响应",
+            521: "Web服务器宕机（521）：源站拒绝连接",
+            522: "连接超时（522）：无法连接到源站服务器",
+            523: "源站不可达（523）：无法到达源站服务器",
+            524: "超时发生（524）：与源站建立连接但未收到响应",
+            525: "SSL握手失败（525）：无法与源站协商SSL/TLS连接",
+            526: "无效的SSL证书（526）：源站SSL证书无效"
+        }
+        
+        # 检查特定的安全相关状态码
+        if self.status_code == 451:
+            return "法律原因不可用（451）：由于法律原因该内容不可用（可能涉及版权或地区限制）"
+        
+        # 返回对应的错误描述或通用描述
+        return http_errors.get(
+            self.status_code, 
+            f"HTTP 错误（{self.status_code}）：{'客户端错误' if 400 <= self.status_code < 500 else '服务器错误' if 500 <= self.status_code < 600 else '未知错误'}"
+        )
 
 
 class DomainChecker:
@@ -202,6 +247,158 @@ class DomainChecker:
             self.logger.error(f"自适应并发调整失败: {e}")
             return self.max_concurrent
     
+    async def _check_websocket(self, url: str, timeout: int = 10) -> CheckResult:
+        """
+        检查WebSocket连接
+        
+        Args:
+            url: WebSocket URL (wss://...)
+            timeout: 超时时间
+            
+        Returns:
+            CheckResult: 检查结果
+        """
+        # 从URL中提取域名
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        name = parsed.netloc or url
+        
+        start_time = datetime.now()
+        
+        try:
+            # 创建SSL上下文（用于wss连接）
+            ssl_context = ssl.create_default_context()
+            
+            # 尝试建立WebSocket连接
+            async with asyncio.timeout(timeout):
+                async with websockets.connect(
+                    url,
+                    ssl=ssl_context if url.startswith('wss') else None,
+                    close_timeout=1
+                ) as websocket:
+                    # 连接成功
+                    response_time = (datetime.now() - start_time).total_seconds()
+                    self.logger.info(f"WebSocket域名 {name} ({url}) 连接成功")
+                    return CheckResult(
+                        domain_name=name,
+                        url=url,
+                        status=CheckStatus.SUCCESS,
+                        response_time=response_time
+                    )
+                    
+        except asyncio.TimeoutError:
+            self.logger.error(f"WebSocket域名 {name} ({url}) 连接超时")
+            return CheckResult(
+                domain_name=name,
+                url=url,
+                status=CheckStatus.TIMEOUT,
+                error_message=f"WebSocket连接超时（{timeout}秒）"
+            )
+            
+        except websockets.exceptions.InvalidURI:
+            self.logger.error(f"WebSocket域名 {name} ({url}) URL格式无效")
+            return CheckResult(
+                domain_name=name,
+                url=url,
+                status=CheckStatus.WEBSOCKET_ERROR,
+                error_message="无效的WebSocket URL格式"
+            )
+            
+        except websockets.exceptions.WebSocketException as e:
+            self.logger.error(f"WebSocket域名 {name} ({url}) 连接失败：{e}")
+            return CheckResult(
+                domain_name=name,
+                url=url,
+                status=CheckStatus.WEBSOCKET_ERROR,
+                error_message=str(e)
+            )
+            
+        except ssl.SSLError as e:
+            self.logger.error(f"WebSocket域名 {name} ({url}) SSL错误：{e}")
+            return CheckResult(
+                domain_name=name,
+                url=url,
+                status=CheckStatus.SSL_ERROR,
+                error_message=str(e)
+            )
+            
+        except Exception as e:
+            error_msg = str(e)
+            if "Name or service not known" in error_msg or "getaddrinfo failed" in error_msg:
+                status = CheckStatus.DNS_ERROR
+            else:
+                status = CheckStatus.WEBSOCKET_ERROR
+            
+            self.logger.error(f"WebSocket域名 {name} ({url}) 检查失败：{error_msg}")
+            return CheckResult(
+                domain_name=name,
+                url=url,
+                status=status,
+                error_message=error_msg
+            )
+    
+    def _check_for_security_issues(self, response: httpx.Response) -> Optional[CheckStatus]:
+        """
+        检查响应是否包含安全问题标识
+        
+        Args:
+            response: HTTP响应
+            
+        Returns:
+            Optional[CheckStatus]: 如果检测到安全问题返回对应状态，否则返回None
+        """
+        try:
+            # 检查响应头中的安全标识
+            content_type = response.headers.get('content-type', '').lower()
+            
+            # 检查是否被标记为钓鱼网站（某些安全服务会在响应头中标记）
+            if 'x-phishing-warning' in response.headers or 'x-malware-warning' in response.headers:
+                return CheckStatus.PHISHING_WARNING
+            
+            # 检查响应内容（仅当content-type为html时）
+            if 'text/html' in content_type:
+                content_lower = response.text[:5000].lower()  # 只检查前5000个字符
+                
+                # 检查Google Safe Browsing警告
+                google_warnings = [
+                    'deceptive site ahead',
+                    'this site may harm your computer',
+                    'the site ahead contains malware',
+                    'phishing attack ahead',
+                    'this site has been reported as unsafe'
+                ]
+                
+                for warning in google_warnings:
+                    if warning in content_lower:
+                        self.logger.warning(f"检测到Google安全警告: {warning}")
+                        return CheckStatus.SECURITY_WARNING
+                
+                # 检查其他浏览器的安全警告
+                browser_warnings = [
+                    'reported attack site',
+                    'suspected phishing site',
+                    'warning: suspected phishing',
+                    'this website has been reported',
+                    'dangerous site',
+                    'unsafe website'
+                ]
+                
+                for warning in browser_warnings:
+                    if warning in content_lower:
+                        self.logger.warning(f"检测到浏览器安全警告: {warning}")
+                        return CheckStatus.SECURITY_WARNING
+                
+                # 检查CloudFlare等CDN的安全拦截页面
+                if 'blocked for security reasons' in content_lower or 'access denied' in content_lower:
+                    if 'cloudflare' in content_lower or 'security challenge' in content_lower:
+                        self.logger.warning("网站被安全服务拦截")
+                        return CheckStatus.SECURITY_WARNING
+            
+        except Exception as e:
+            self.logger.debug(f"安全检查时发生错误: {e}")
+        
+        return None
+    
     async def _check_once(self, url: str, quick_mode: bool = False) -> CheckResult:
         """
         执行单次域名检查（不重试）
@@ -213,10 +410,19 @@ class DomainChecker:
         Returns:
             CheckResult: 检查结果
         """
+        # 检查是否是WebSocket URL
+        if url.startswith(('ws://', 'wss://')):
+            return await self._check_websocket(url, timeout=5 if quick_mode else self.timeout)
+        
         # 自动添加 https:// 前缀（如果没有协议）
         original_url = url
         if not url.startswith(('http://', 'https://')):
-            url = f'https://{url}'
+            # 检查是否应该使用wss协议（通过域名判断）
+            if 'ws.' in url or 'websocket' in url.lower() or 'wss' in url.lower():
+                url = f'wss://{url}'
+                return await self._check_websocket(url, timeout=5 if quick_mode else self.timeout)
+            else:
+                url = f'https://{url}'
         
         # 从 URL 中提取域名作为名称
         from urllib.parse import urlparse
@@ -234,6 +440,19 @@ class DomainChecker:
             client = await self._get_client()
             response = await client.get(url)
             response_time = (datetime.now() - start_time).total_seconds()
+            
+            # 先检查安全问题
+            security_status = self._check_for_security_issues(response)
+            if security_status:
+                self.logger.warning(f"域名 {name} ({url}) 检测到安全问题")
+                return CheckResult(
+                    domain_name=name,
+                    url=url,
+                    status=security_status,
+                    status_code=response.status_code,
+                    error_message="网站可能存在安全风险",
+                    response_time=response_time
+                )
             
             # 检查状态码
             if response.status_code in expected_codes:
@@ -322,10 +541,19 @@ class DomainChecker:
         Returns:
             CheckResult: 检查结果
         """
+        # 检查是否是WebSocket URL
+        if url.startswith(('ws://', 'wss://')):
+            return await self._check_websocket(url, timeout=5 if quick_mode else self.timeout)
+        
         # 自动添加 https:// 前缀（如果没有协议）
         original_url = url  # 保存原始输入
         if not url.startswith(('http://', 'https://')):
-            url = f'https://{url}'
+            # 检查是否应该使用wss协议（通过域名判断）
+            if 'ws.' in url or 'websocket' in url.lower() or 'wss' in url.lower():
+                url = f'wss://{url}'
+                return await self._check_websocket(url, timeout=5 if quick_mode else self.timeout)
+            else:
+                url = f'https://{url}'
         
         # 从 URL 中提取域名作为名称
         from urllib.parse import urlparse
@@ -345,6 +573,19 @@ class DomainChecker:
             client = await self._get_client()
             response = await client.get(url)
             response_time = (datetime.now() - start_time).total_seconds()
+            
+            # 先检查安全问题
+            security_status = self._check_for_security_issues(response)
+            if security_status:
+                self.logger.warning(f"域名 {name} ({url}) 检测到安全问题")
+                return CheckResult(
+                    domain_name=name,
+                    url=url,
+                    status=security_status,
+                    status_code=response.status_code,
+                    error_message="网站可能存在安全风险",
+                    response_time=response_time
+                )
             
             # 检查状态码是否在预期范围内
             if response.status_code in expected_codes:
