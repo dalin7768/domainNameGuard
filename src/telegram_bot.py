@@ -679,25 +679,47 @@ class TelegramBot:
             await self.send_message("❌ 未知的子命令", reply_to=msg_id)
     
     async def cmd_stop(self, args: str, msg_id: int, user_id: int, username: str):
-        """停止监控"""
+        """停止监控 - 立即强制停止"""
         if self.stop_callback:
-            await self.send_message("⏹️ 正在停止监控服务...", reply_to=msg_id)
+            await self.send_message("🛑 正在强制停止监控服务...", reply_to=msg_id)
             # 设置停止标志，结束监听循环
             self.is_running = False
             # 调用停止回调，传递send_notification=False避免重复发送消息
-            await self.stop_callback(send_notification=False)
-            await self.send_message("⏹️ 监控服务已停止", reply_to=msg_id)
+            await self.stop_callback(send_notification=False, force=True)
+            # 停止后立即退出程序
+            import sys
+            self.logger.info("收到停止命令，程序即将退出")
+            sys.exit(0)
         else:
             await self.send_message("❌ 停止功能未就绪", reply_to=msg_id)
     
     async def cmd_restart(self, args: str, msg_id: int, user_id: int, username: str):
-        """重启监控（已弃用）"""
-        await self.send_message(
-            "⚠️ **重启命令已更改**\n\n"
-            "请使用 `/reload` 重新加载配置\n"
-            "大部分配置更改无需重启即可生效",
-            reply_to=msg_id
-        )
+        """重启监控服务"""
+        if self.restart_callback:
+            await self.send_message(
+                "🔄 **正在重启服务**\n\n"
+                "服务将在几秒后重新启动...",
+                reply_to=msg_id
+            )
+            # 调用重启回调
+            await self.restart_callback()
+        else:
+            # 如果没有重启回调，使用系统重启
+            await self.send_message(
+                "🔄 **正在重启服务**\n\n"
+                "使用 systemd 或 PM2 管理的服务将自动重启...",
+                reply_to=msg_id
+            )
+            # 设置停止标志
+            self.is_running = False
+            if self.stop_callback:
+                await self.stop_callback(send_notification=False, force=True)
+            # 退出程序，让 systemd/PM2 重启
+            import sys
+            import os
+            self.logger.info("收到重启命令，程序即将退出并重启")
+            # 退出码3表示需要重启
+            os._exit(3)
     
     async def cmd_reload(self, args: str, msg_id: int, user_id: int, username: str):
         """重新加载配置"""

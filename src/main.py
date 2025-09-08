@@ -159,7 +159,8 @@ class DomainMonitor:
             # 设置命令回调函数，当用户发送命令时会调用这些函数
             self.bot.set_callbacks(
                 check=self.run_check,      # /check 命令
-                stop=lambda: self.stop(send_notification=False),  # /stop 命令，不重复发送通知
+                stop=lambda **kwargs: self.stop(**kwargs),  # /stop 命令，支持 force 参数
+                restart=self.restart_service,  # /restart 命令，重启服务
                 reload=self.reload_config  # /reload 命令，重新加载配置
             )
             self.logger.info("Telegram Bot 初始化完成")
@@ -432,30 +433,43 @@ class DomainMonitor:
         self.logger.info("配置测试完成")
         return True
     
-    async def stop(self, send_notification: bool = True) -> None:
+    async def stop(self, send_notification: bool = True, force: bool = False) -> None:
         """停止监控服务
         
         优雅地停止所有运行中的任务：
         1. 设置停止标志
         2. 发送停止通知（在取消任务之前）
         3. 取消所有异步任务
-        4. 等待任务结束
+        4. 等待任务结束（除非强制停止）
         
         Args:
             send_notification: 是否发送停止通知，默认为True
                               当从telegram命令停止时应设为False避免重复
+            force: 是否强制停止（不等待任务完成）
         """
-        self.logger.info("正在停止监控服务...")
+        self.logger.info(f"正在{'强制' if force else ''}停止监控服务...")
         self.is_running = False  # 设置停止标志
         
         # 先发送停止通知（在取消任务之前，确保消息能发送出去）
         if send_notification and self.bot:
             try:
-                await self.bot.send_message("⏹️ 监控服务已停止")
+                await self.bot.send_message("🛑 监控服务已停止")
             except Exception as e:
                 self.logger.error(f"发送停止通知失败: {e}")
         
-        # 收集所有需要取消的任务
+        # 如果是强制停止，立即取消所有任务并退出
+        if force:
+            # 立即取消所有任务
+            if self.check_task and not self.check_task.done():
+                self.check_task.cancel()
+            if self.bot_task and not self.bot_task.done():
+                self.bot_task.cancel()
+            if self.schedule_task and not self.schedule_task.done():
+                self.schedule_task.cancel()
+            self.logger.info("强制停止：已取消所有任务")
+            return
+        
+        # 正常停止：收集所有需要取消的任务
         tasks = []
         if self.check_task and not self.check_task.done():
             self.check_task.cancel()
@@ -475,6 +489,30 @@ class DomainMonitor:
             await asyncio.gather(*tasks, return_exceptions=True)
         
         self.logger.info("监控服务已停止")
+    
+    async def restart_service(self) -> None:
+        """重启监控服务
+        
+        通过退出程序让 systemd 或 PM2 重启服务
+        """
+        self.logger.info("收到重启命令，准备重启服务...")
+        
+        # 发送重启通知
+        if self.bot:
+            try:
+                await self.bot.send_message("🔄 服务正在重启，请稍候...")
+            except Exception as e:
+                self.logger.error(f"发送重启通知失败: {e}")
+        
+        # 停止所有任务
+        await self.stop(send_notification=False, force=True)
+        
+        # 退出程序，让进程管理器重启
+        import os
+        import sys
+        self.logger.info("程序即将退出并由进程管理器重启...")
+        # 退出码3表示需要重启
+        os._exit(3)
     
     async def reload_config(self) -> None:
         """重新加载配置

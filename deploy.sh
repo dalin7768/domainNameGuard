@@ -164,6 +164,8 @@ Environment="PATH=$PROJECT_DIR/venv/bin"
 ExecStart=$PROJECT_DIR/venv/bin/python $PROJECT_DIR/src/main.py
 Restart=always
 RestartSec=10
+# 退出码3表示重启请求
+SuccessExitStatus=3
 StandardOutput=append:/var/log/domain-monitor.log
 StandardError=append:/var/log/domain-monitor.log
 
