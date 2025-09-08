@@ -478,7 +478,7 @@ class DomainChecker:
         batch_size = self.max_concurrent
         total_batches = (domain_count + batch_size - 1) // batch_size
         
-        self.logger.info(f"开始检查 {domain_count} 个域名，并发数：{self.max_concurrent}，分 {total_batches} 批处理")
+        self.logger.info(f"开始检查 {domain_count} 个域名，并发数：{self.max_concurrent}，预计分 {total_batches} 批处理")
         
         # 记录开始时间用于估算剩余时间
         start_time = datetime.now()
@@ -487,20 +487,27 @@ class DomainChecker:
         # 快速模式：超过50个域名启用
         quick_mode = domain_count > 50
         
-        # 分批处理
-        for batch_idx in range(total_batches):
+        # 分批处理 - 使用while循环确保处理所有域名
+        batch_idx = 0
+        processed_count = 0
+        
+        while processed_count < domain_count:
             # 每批开始前检查是否需要调整并发数
             if self.auto_adjust and batch_idx > 0:
                 self._adjust_concurrent_by_resources()
                 # 如果并发数变了，重新计算批次大小
                 if self.max_concurrent != batch_size:
                     batch_size = self.max_concurrent
-                    total_batches = (domain_count + batch_size - 1) // batch_size
             
-            batch_start = batch_idx * batch_size
+            batch_start = processed_count
             batch_end = min(batch_start + batch_size, domain_count)
             batch_urls = urls[batch_start:batch_end]
             current_batch = batch_idx + 1
+            
+            # 重新计算总批次数（基于当前批次大小）
+            remaining_domains = domain_count - processed_count
+            remaining_batches = (remaining_domains + batch_size - 1) // batch_size
+            total_batches = batch_idx + remaining_batches
             
             self.logger.info(f"处理第 {current_batch}/{total_batches} 批，包含 {len(batch_urls)} 个域名，当前并发数: {self.max_concurrent}")
             
@@ -604,8 +611,12 @@ class DomainChecker:
                 except Exception as e:
                     self.logger.error(f"进度回调执行失败：{e}")
             
+            # 更新已处理计数和批次索引
+            processed_count += len(batch_urls)
+            batch_idx += 1
+            
             # 批次间短暂延迟，避免过度压力
-            if current_batch < total_batches:
+            if processed_count < domain_count:
                 await asyncio.sleep(0.5)
         
         # 计算总耗时
@@ -616,7 +627,7 @@ class DomainChecker:
         success_count = sum(1 for r in all_results if r.is_success)
         failed_count = len(all_results) - success_count
         
-        self.logger.info(f"全部检查完成：成功 {success_count} 个，失败 {failed_count} 个，耗时 {total_duration:.1f} 秒")
+        self.logger.info(f"全部检查完成：共处理 {len(all_results)}/{domain_count} 个域名，成功 {success_count} 个，失败 {failed_count} 个，耗时 {total_duration:.1f} 秒")
         
         # 大量域名检查后触发垃圾回收
         if domain_count > 500:
