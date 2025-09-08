@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  domain-monitor:
+    build: .
+    container_name: domain-monitor
+    restart: always
+    volumes:
+      - ./config.json:/app/config.json
+      - ./logs:/app/logs
+    environment:
+      - TZ=Asia/Shanghai
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
