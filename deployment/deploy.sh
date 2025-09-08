@@ -40,11 +40,16 @@ check_requirements() {
         exit 1
     fi
     
-    # 检查pip
-    if ! command -v pip3 &> /dev/null; then
-        print_error "pip3 未安装"
+    # 检查pip (优先pip3，fallback到pip)
+    if command -v pip3 &> /dev/null; then
+        PIP_CMD="pip3"
+    elif command -v pip &> /dev/null; then
+        PIP_CMD="pip"
+    else
+        print_error "pip 未安装"
         exit 1
     fi
+    print_info "使用 $PIP_CMD"
     
     print_success "系统要求满足"
 }
