@@ -423,13 +423,14 @@ class DomainChecker:
         
         return None
     
-    async def _check_once(self, url: str, quick_mode: bool = False) -> CheckResult:
+    async def _check_once(self, url: str, quick_mode: bool = False, try_http: bool = False) -> CheckResult:
         """
         执行单次域名检查（不重试）
         
         Args:
             url: 要检查的URL或域名
             quick_mode: 快速模式
+            try_http: 是否尝试HTTP（用于HTTPS失败后的降级）
             
         Returns:
             CheckResult: 检查结果
@@ -844,7 +845,7 @@ class DomainChecker:
             async def check_single_no_retry(url: str) -> CheckResult:
                 """单次检查，不内部重试"""
                 try:
-                    return await self._check_once(url, quick_mode)
+                    return await self._check_once(url, quick_mode, try_http=False)
                 except Exception as e:
                     self.logger.error(f"检查 {url} 失败: {e}")
                     return CheckResult(
@@ -886,7 +887,7 @@ class DomainChecker:
                 
                 async def retry_with_semaphore(url: str) -> CheckResult:
                     async with retry_semaphore:
-                        return await self.check_single_domain(url, retry_attempt=1, quick_mode=quick_mode)
+                        return await self.check_single_domain(url, retry_attempt=1, quick_mode=quick_mode, try_http=False)
                 
                 retry_tasks = []
                 for url, original_idx in retry_needed:
@@ -1028,7 +1029,7 @@ class DomainChecker:
         
         async def check_with_limit(url: str) -> CheckResult:
             async with semaphore:
-                return await self.check_single_domain(url, 0, quick_mode)
+                return await self.check_single_domain(url, 0, quick_mode, try_http=False)
         
         # 创建任务并流式返回结果
         tasks = [asyncio.create_task(check_with_limit(url)) for url in urls]

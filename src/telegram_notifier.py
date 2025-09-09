@@ -143,6 +143,16 @@ class TelegramNotifier:
         Returns:
             bool: 是否发送成功
         """
+        # Telegram 消息长度限制
+        MAX_MESSAGE_LENGTH = 4096
+        
+        # 如果消息过长，截断并添加提示
+        if len(message) > MAX_MESSAGE_LENGTH:
+            # 保留一些空间用于添加截断提示
+            truncate_at = MAX_MESSAGE_LENGTH - 100
+            message = message[:truncate_at] + "\n\n... [消息已截断，请查看日志获取完整信息]"
+            self.logger.warning(f"消息过长，已截断至 {MAX_MESSAGE_LENGTH} 字符")
+        
         try:
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.post(
@@ -279,9 +289,27 @@ class TelegramNotifier:
                 CheckStatus.UNKNOWN_ERROR: ("❓", "其他错误")
             }
             
+            # 收集所有错误域名信息
+            error_messages = []
+            current_message = f"⚠️ **域名检查完成**\n\n"
+            current_message += f"📊 **统计信息**\n"
+            current_message += f"🔍 检查总数: {total_count} 个\n"
+            current_message += f"✅ 正常: {success_count} 个\n"
+            current_message += f"❌ 异常: {failed_count} 个\n\n"
+            
             for status, domains in error_groups.items():
                 emoji, name = error_names.get(status, ("⚠️", "错误"))
-                message += f"**{emoji} {name} ({len(domains)}个):**\n"
+                domain_count = len(domains)
+                
+                # 添加错误类型标题
+                section_header = f"**{emoji} {name} ({domain_count}个):**\n"
+                
+                # 检查是否需要新消息
+                if len(current_message) + len(section_header) > 3500:  # 留一些空间给结尾
+                    error_messages.append(current_message)
+                    current_message = f"⚠️ **域名检查详情（续）**\n\n"
+                
+                current_message += section_header
                 
                 # 显示所有域名
                 for result in domains:
@@ -363,16 +391,25 @@ class TelegramNotifier:
                     elif status == CheckStatus.WEBSOCKET_ERROR:
                         error_details.append("WebSocket连接失败")
                     
-                    # 构建最终消息
+                    # 构建域名行
                     if error_details:
-                        message += f"  • [{result.domain_name}]({clickable_url}) ({', '.join(error_details)})\n"
+                        domain_line = f"  • {result.domain_name} ({', '.join(error_details)})\n"
                     else:
-                        message += f"  • [{result.domain_name}]({clickable_url})\n"
+                        domain_line = f"  • {result.domain_name}\n"
+                    
+                    # 检查是否会超过消息长度限制
+                    if len(current_message) + len(domain_line) > 3500:
+                        # 保存当前消息并开始新消息
+                        error_messages.append(current_message + "\n")
+                        current_message = f"⚠️ **域名检查详情（续）**\n\n"
+                        current_message += f"**{emoji} {name}（续）:**\n"
+                    
+                    current_message += domain_line
                 
-                message += "\n"
+                current_message += "\n"
             
-            # 添加时间戳
-            message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+            # 添加时间戳到最后一条消息
+            time_info = f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
             
             # 添加下次执行时间
             if next_run_time:
@@ -380,17 +417,37 @@ class TelegramNotifier:
                 if time_diff > 0:
                     minutes = int(time_diff // 60)
                     seconds = int(time_diff % 60)
-                    message += f"⏰ 下次检查将在 {minutes} 分 {seconds} 秒后开始\n"
-                    message += f"📅 具体时间: {next_run_time.strftime('%H:%M:%S')}"
+                    time_info += f"⏰ 下次检查将在 {minutes} 分 {seconds} 秒后开始\n"
+                    time_info += f"📅 具体时间: {next_run_time.strftime('%H:%M:%S')}"
                 else:
-                    message += f"⏰ 下次检查将立即开始"
-        
-        # 发送汇总消息
-        success = await self.send_message(message)
-        if success:
-            self.logger.info(f"检查汇总通知已发送 - 共 {total_count} 个域名，{success_count} 个正常，{failed_count} 个异常")
-        else:
-            self.logger.error("检查汇总通知发送失败")
+                    time_info += f"⏰ 下次检查将立即开始"
+            
+            # 添加时间信息到最后一条消息
+            if len(current_message) + len(time_info) > 4000:
+                error_messages.append(current_message)
+                error_messages.append(time_info)
+            else:
+                current_message += time_info
+                error_messages.append(current_message)
+            
+            # 发送所有消息
+            send_success = True
+            for i, msg in enumerate(error_messages):
+                if i > 0:
+                    # 在消息之间添加小延迟，避免被限流
+                    await asyncio.sleep(0.5)
+                
+                success = await self.send_message(msg)
+                if success:
+                    self.logger.info(f"检查汇总通知 {i+1}/{len(error_messages)} 已发送")
+                else:
+                    self.logger.error(f"检查汇总通知 {i+1}/{len(error_messages)} 发送失败")
+                    send_success = False
+            
+            if send_success:
+                self.logger.info(f"所有检查汇总通知已发送 - 共 {total_count} 个域名，{success_count} 个正常，{failed_count} 个异常")
+            else:
+                self.logger.error("部分检查汇总通知发送失败")
     
     async def _send_grouped_error_messages(self, error_groups: Dict[CheckStatus, List[CheckResult]]) -> None:
         """

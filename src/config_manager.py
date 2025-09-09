@@ -93,7 +93,9 @@ class ConfigManager:
             try:
                 with open(self.config_file, 'r', encoding='utf-8') as f:
                     self.config = json.load(f)
-                self.logger.info("成功加载配置文件")
+                # 添加详细日志
+                domain_count = len(self.config.get('domains', []))
+                self.logger.info(f"成功加载配置文件，包含 {domain_count} 个域名")
                 return True
             except json.JSONDecodeError as e:
                 # JSON 格式错误，可能是文件损坏或格式不正确

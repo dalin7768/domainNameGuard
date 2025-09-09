@@ -232,6 +232,9 @@ class DomainMonitor:
             # 这样通过 Telegram 命令修改的配置会立即生效
             domains = self.config_manager.get_domains()
             
+            # 添加详细日志
+            self.logger.info(f"从配置获取到 {len(domains)} 个域名")
+            
             if not domains:
                 self.logger.warning("没有配置监控域名")
                 return
@@ -241,6 +244,9 @@ class DomainMonitor:
             if len(unique_domains) != len(domains):
                 self.logger.warning(f"发现重复域名，原始数量: {len(domains)}，去重后: {len(unique_domains)}")
                 domains = unique_domains
+            
+            # 再次记录最终域名数量
+            self.logger.info(f"准备检查 {len(domains)} 个域名（去重后）")
             
             # 动态更新检查器参数
             check_config = self.config_manager.get('check', {})
@@ -442,6 +448,7 @@ class DomainMonitor:
                 
                 # 执行检查
                 if self.is_running:
+                    # 所有检查都按定时检查逻辑处理
                     self.check_task = asyncio.create_task(self.run_check())
                     # 等待检查完成
                     try:
@@ -903,6 +910,13 @@ class DomainMonitor:
         daily_report_enabled = daily_report_config.get('enabled', False)
         daily_report_time = daily_report_config.get('time', '00:00')
         
+        # 计算首次检查的预估时间
+        domain_count = len(domains)
+        batches = (domain_count + max_concurrent - 1) // max_concurrent
+        estimated_seconds = batches * (timeout_seconds + 2)
+        eta_minutes = estimated_seconds // 60
+        eta_seconds = estimated_seconds % 60
+        
         await self.bot.send_message(
             f"🚀 **域名监控服务已启动**\n\n"
             f"📊 **监控配置**\n"
@@ -917,8 +931,12 @@ class DomainMonitor:
             f"├ 恢复通知: {'✅ 开启' if notify_on_recovery else '❌ 关闭'}\n"
             f"├ 失败阈值: {failure_threshold} 次\n"
             f"└ 每日报告: {'✅ ' + daily_report_time if daily_report_enabled else '❌ 关闭'}\n\n"
+            f"🔍 **即将开始首次检查**\n"
+            f"├ 检查域名数: {domain_count} 个\n"
+            f"├ 分批数: {batches} 批\n"
+            f"└ 预计耗时: {eta_minutes}分{eta_seconds}秒\n\n"
             f"💡 使用 /help 查看所有命令\n"
-            f"🔍 使用 /check 立即执行检查"
+            f"🔍 使用 /check 立即执行额外检查"
         )
         
         # 启动定时检查任务（包含首次检查）
