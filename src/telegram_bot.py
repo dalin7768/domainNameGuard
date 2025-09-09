@@ -60,7 +60,9 @@ class TelegramBot:
             '/admin': self.cmd_admin,
             '/stop': self.cmd_stop,
             '/restart': self.cmd_restart,
-            '/reload': self.cmd_reload
+            '/reload': self.cmd_reload,
+            '/quiet': self.cmd_toggle_quiet,
+            '/dailyreport': self.cmd_daily_report
         }
         
         # 检查回调函数
@@ -68,11 +70,15 @@ class TelegramBot:
         self.stop_callback: Optional[Callable] = None
         self.restart_callback: Optional[Callable] = None
         self.reload_callback: Optional[Callable] = None
+        self.get_status_callback: Optional[Callable] = None  # 获取状态信息的回调
+        self.send_daily_report_callback: Optional[Callable] = None  # 发送每日报告的回调
     
     def set_callbacks(self, check: Optional[Callable] = None, 
                       stop: Optional[Callable] = None,
                       restart: Optional[Callable] = None,
-                      reload: Optional[Callable] = None):
+                      reload: Optional[Callable] = None,
+                      get_status: Optional[Callable] = None,
+                      send_daily_report: Optional[Callable] = None):
         """设置回调函数"""
         if check:
             self.check_callback = check
@@ -82,6 +88,10 @@ class TelegramBot:
             self.restart_callback = restart
         if reload:
             self.reload_callback = reload
+        if get_status:
+            self.get_status_callback = get_status
+        if send_daily_report:
+            self.send_daily_report_callback = send_daily_report
     
     async def send_message(self, text: str, parse_mode: str = "Markdown", 
                           reply_to: Optional[int] = None) -> bool:
@@ -287,6 +297,11 @@ class TelegramBot:
 `/recovery` - 切换恢复通知 *(热更新)*
 `/allsuccess` - 切换全部正常通知 *(热更新)*
 `/autoadjust` - 切换自适应并发 *(热更新)*
+`/quiet` - 切换静默模式 *(热更新)*
+
+📊 **统计报告**:
+`/dailyreport` - 管理每日统计报告
+`/dailyreport now` - 立即发送今日报告
 
 👥 **管理员设置** *(需重启)*:
 `/admin list` - 查看管理员列表
@@ -330,14 +345,82 @@ class TelegramBot:
         domains = self.config_manager.get_domains()
         interval = self.config_manager.get('check.interval_minutes')
         
-        status_text = f"""📊 **监控状态**
+        # 构建基础状态信息
+        status_text = f"""📊 **监控状态详情**
 
-**监控域名数**: {len(domains)} 个
-**检查间隔**: {interval} 分钟
-**服务状态**: 🟢 运行中
-
-使用 /list 查看详细域名列表
-使用 /config 查看完整配置"""
+🔧 **基础信息**
+├ 监控域名数: {len(domains)} 个
+├ 检查间隔: {interval} 分钟
+└ 服务状态: 🟢 运行中
+"""
+        
+        # 如果有状态回调，获取详细统计信息
+        if self.get_status_callback:
+            try:
+                status_info = await self.get_status_callback()
+                
+                # 添加运行时间信息
+                if status_info.get('service_start_time'):
+                    uptime = datetime.now() - status_info['service_start_time']
+                    days = uptime.days
+                    hours = uptime.seconds // 3600
+                    minutes = (uptime.seconds % 3600) // 60
+                    uptime_str = f"{days}天 {hours}小时 {minutes}分钟" if days > 0 else f"{hours}小时 {minutes}分钟"
+                    status_text += f"\n⏱️ **运行时间**\n└ {uptime_str}\n"
+                
+                # 添加检查时间信息
+                if status_info.get('last_check_time') or status_info.get('next_check_time'):
+                    status_text += "\n🕐 **检查时间**\n"
+                    
+                    if status_info.get('last_check_time'):
+                        last_check = status_info['last_check_time']
+                        time_since = datetime.now() - last_check
+                        mins_ago = int(time_since.total_seconds() / 60)
+                        status_text += f"├ 上次检查: {last_check.strftime('%H:%M:%S')} ({mins_ago}分钟前)\n"
+                    
+                    if status_info.get('next_check_time'):
+                        next_check = status_info['next_check_time']
+                        time_until = next_check - datetime.now()
+                        mins_until = max(0, int(time_until.total_seconds() / 60))
+                        status_text += f"└ 下次检查: {next_check.strftime('%H:%M:%S')} ({mins_until}分钟后)\n"
+                
+                # 添加上次检查结果统计
+                if status_info.get('last_check_results'):
+                    results = status_info['last_check_results']
+                    if results['total'] > 0:
+                        success_rate = (results['success'] / results['total']) * 100
+                        status_text += f"\n📈 **上次检查结果**\n"
+                        status_text += f"├ 总数: {results['total']} 个\n"
+                        status_text += f"├ ✅ 正常: {results['success']} 个\n"
+                        status_text += f"├ ❌ 异常: {results['failed']} 个\n"
+                        status_text += f"└ 成功率: {success_rate:.1f}%\n"
+                        
+                        # 显示错误类型分布
+                        if results.get('error_types') and results['error_types']:
+                            status_text += "\n🔍 **错误类型分布**\n"
+                            error_types = results['error_types']
+                            # 按数量排序
+                            sorted_errors = sorted(error_types.items(), key=lambda x: x[1], reverse=True)
+                            for i, (error_type, count) in enumerate(sorted_errors):
+                                is_last = i == len(sorted_errors) - 1
+                                prefix = "└" if is_last else "├"
+                                # 简化错误类型名称
+                                display_name = error_type.replace('_', ' ').title()
+                                status_text += f"{prefix} {display_name}: {count} 个\n"
+                
+                # 添加总体统计
+                if status_info.get('total_checks_count'):
+                    status_text += f"\n📊 **总体统计**\n"
+                    status_text += f"└ 总检查次数: {status_info['total_checks_count']} 次\n"
+                    
+            except Exception as e:
+                self.logger.error(f"获取状态信息时出错: {e}")
+                # 继续显示基础信息
+        
+        status_text += "\n💡 **快速操作**\n"
+        status_text += "├ /list - 查看域名列表\n"
+        status_text += "├ /check - 立即检查\n"
+        status_text += "└ /config - 查看配置"
         
         await self.send_message(status_text, reply_to=msg_id)
     
@@ -485,7 +568,7 @@ class TelegramBot:
         """立即检查命令"""
         if self.check_callback:
             await self.send_message("🔍 开始执行域名检查...", reply_to=msg_id)
-            asyncio.create_task(self.check_callback())
+            asyncio.create_task(self.check_callback(is_manual=True))
         else:
             await self.send_message("❌ 检查功能未就绪", reply_to=msg_id)
     
@@ -729,6 +812,97 @@ class TelegramBot:
             await self.reload_callback()
         else:
             await self.send_message("❌ 重新加载功能未就绪", reply_to=msg_id)
+    
+    async def cmd_toggle_quiet(self, args: str, msg_id: int, user_id: int, username: str):
+        """切换静默模式（定时检查时全部成功不发送通知）"""
+        current = self.config_manager.get('notification.quiet_on_success', False)
+        new_value = not current
+        self.config_manager.set('notification.quiet_on_success', new_value)
+        self.config_manager.save_config()
+        
+        status = "开启" if new_value else "关闭"
+        await self.send_message(
+            f"🔇 **静默模式已{status}**\n\n"
+            f"{'定时检查时，如果全部域名正常将不发送通知' if new_value else '定时检查完成后将始终发送通知'}\n"
+            f"（手动检查不受此设置影响）",
+            reply_to=msg_id
+        )
+    
+    async def cmd_daily_report(self, args: str, msg_id: int, user_id: int, username: str):
+        """管理每日统计报告"""
+        if not args:
+            # 显示当前状态
+            daily_config = self.config_manager.get('daily_report', {})
+            enabled = daily_config.get('enabled', False)
+            report_time = daily_config.get('time', '00:00')
+            
+            status_text = f"📊 **每日报告设置**\n\n"
+            status_text += f"状态: {'✅ 已启用' if enabled else '❌ 已禁用'}\n"
+            status_text += f"发送时间: {report_time}\n\n"
+            status_text += "**使用方法**:\n"
+            status_text += "`/dailyreport enable` - 启用每日报告\n"
+            status_text += "`/dailyreport disable` - 禁用每日报告\n"
+            status_text += "`/dailyreport time 08:00` - 设置发送时间\n"
+            status_text += "`/dailyreport now` - 立即发送今日报告"
+            
+            await self.send_message(status_text, reply_to=msg_id)
+            return
+        
+        parts = args.split()
+        action = parts[0].lower()
+        
+        if action == "enable":
+            self.config_manager.set('daily_report.enabled', True)
+            self.config_manager.save_config()
+            await self.send_message(
+                "✅ 每日报告已启用\n\n"
+                "报告将在每天指定时间发送（需重启服务生效）",
+                reply_to=msg_id
+            )
+        
+        elif action == "disable":
+            self.config_manager.set('daily_report.enabled', False)
+            self.config_manager.save_config()
+            await self.send_message("❌ 每日报告已禁用", reply_to=msg_id)
+        
+        elif action == "time":
+            if len(parts) < 2:
+                await self.send_message(
+                    "❌ 请提供时间\n\n示例: `/dailyreport time 08:00`",
+                    reply_to=msg_id
+                )
+                return
+            
+            time_str = parts[1]
+            # 验证时间格式
+            try:
+                hour, minute = map(int, time_str.split(':'))
+                if 0 <= hour < 24 and 0 <= minute < 60:
+                    self.config_manager.set('daily_report.time', time_str)
+                    self.config_manager.save_config()
+                    await self.send_message(
+                        f"⏰ 每日报告时间已设置为: {time_str}\n\n"
+                        "（需重启服务生效）",
+                        reply_to=msg_id
+                    )
+                else:
+                    await self.send_message("❌ 无效的时间格式", reply_to=msg_id)
+            except:
+                await self.send_message(
+                    "❌ 无效的时间格式\n\n请使用 HH:MM 格式，如 08:00",
+                    reply_to=msg_id
+                )
+        
+        elif action == "now":
+            # 立即发送今日报告
+            if self.send_daily_report_callback:
+                await self.send_message("📊 正在生成今日统计报告...", reply_to=msg_id)
+                await self.send_daily_report_callback()
+            else:
+                await self.send_message("❌ 报告功能未就绪", reply_to=msg_id)
+        
+        else:
+            await self.send_message("❌ 未知的子命令", reply_to=msg_id)
     
     async def listen_for_commands(self):
         """监听命令的主循环"""

@@ -176,6 +176,8 @@ class TelegramNotifier:
                              failure_threshold: int = 2,
                              notify_recovery: bool = True,
                              notify_all_success: bool = False,
+                             quiet_on_success: bool = False,
+                             is_manual: bool = False,
                              next_run_time: Optional[datetime] = None) -> None:
         """
         通知检查结果（简化版，只发送汇总）
@@ -185,6 +187,8 @@ class TelegramNotifier:
             failure_threshold: 失败阈值
             notify_recovery: 是否通知恢复
             notify_all_success: 是否在全部正常时通知
+            quiet_on_success: 定时检查时，如果全部成功是否静默（不发送通知）
+            is_manual: 是否为手动触发的检查
         """
         # 更新失败计数（用于内部跟踪）
         for result in results:
@@ -194,14 +198,18 @@ class TelegramNotifier:
                 self.failure_count[result.url] = self.failure_count.get(result.url, 0) + 1
         
         # 发送统一的检查完成通知（包含所有信息）
-        await self._send_check_summary(results, notify_all_success, next_run_time=next_run_time)
+        await self._send_check_summary(results, notify_all_success, quiet_on_success, is_manual, next_run_time=next_run_time)
     
-    async def _send_check_summary(self, results: List[CheckResult], notify_all_success: bool, next_run_time: Optional[datetime] = None) -> None:
+    async def _send_check_summary(self, results: List[CheckResult], notify_all_success: bool, 
+                                  quiet_on_success: bool = False, is_manual: bool = False, 
+                                  next_run_time: Optional[datetime] = None) -> None:
         """发送检查汇总通知（优化版，按错误类型分组）
         
         Args:
             results: 检查结果列表  
             notify_all_success: 是否在全部正常时发送通知
+            quiet_on_success: 定时检查时，如果全部成功是否静默（不发送通知）
+            is_manual: 是否为手动触发的检查
         """
         if not results:
             return
@@ -211,11 +219,17 @@ class TelegramNotifier:
         success_count = sum(1 for r in results if r.is_success)
         failed_count = total_count - success_count
         
-        # 如果有失败的域名，总是发送汇总
-        # 如果全部正常，根据notify_all_success决定是否发送
-        if failed_count == 0 and not notify_all_success:
-            self.logger.info(f"检查完成：{total_count} 个域名全部正常，未发送汇总通知")
-            return
+        # 决定是否发送通知的逻辑：
+        # 1. 手动检查：总是发送通知
+        # 2. 定时检查且有失败：总是发送通知
+        # 3. 定时检查且全部成功：根据quiet_on_success和notify_all_success决定
+        if not is_manual and failed_count == 0:
+            if quiet_on_success:
+                self.logger.info(f"定时检查完成：{total_count} 个域名全部正常，静默模式已启用，不发送通知")
+                return
+            elif not notify_all_success:
+                self.logger.info(f"定时检查完成：{total_count} 个域名全部正常，未启用全部成功通知")
+                return
         
         # 构建汇总消息
         if failed_count == 0:

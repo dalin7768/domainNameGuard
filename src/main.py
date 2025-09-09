@@ -15,7 +15,7 @@ import signal
 from pathlib import Path
 from datetime import datetime, timedelta
 import time
-from typing import Optional
+from typing import Optional, List
 
 from config_manager import ConfigManager
 from domain_checker import DomainChecker, CheckResult, CheckStatus
@@ -55,6 +55,30 @@ class DomainMonitor:
         
         # 存储当前运行中的间隔时间（用于比较）
         self.current_interval: Optional[int] = None
+        
+        # 统计信息跟踪
+        self.last_check_time: Optional[datetime] = None    # 上次检查时间
+        self.next_check_time: Optional[datetime] = None    # 下次检查时间
+        self.last_check_results = {                        # 上次检查结果统计
+            "total": 0,
+            "success": 0,
+            "failed": 0,
+            "error_types": {}  # 错误类型统计
+        }
+        self.service_start_time: datetime = datetime.now() # 服务启动时间
+        self.total_checks_count: int = 0                   # 总检查次数
+        
+        # 每日统计数据
+        self.daily_stats = {
+            "date": datetime.now().date(),
+            "total_checks": 0,
+            "total_domains_checked": 0,
+            "total_success": 0,
+            "total_failed": 0,
+            "error_summary": {},  # 错误类型汇总
+            "availability_by_domain": {}  # 每个域名的可用性统计
+        }
+        self.daily_report_task: Optional[asyncio.Task] = None  # 每日报告任务
         
         # 设置信号处理
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -161,7 +185,9 @@ class DomainMonitor:
                 check=self.run_check,      # /check 命令
                 stop=lambda **kwargs: self.stop(**kwargs),  # /stop 命令，支持 force 参数
                 restart=self.restart_service,  # /restart 命令，重启服务
-                reload=self.reload_config  # /reload 命令，重新加载配置
+                reload=self.reload_config,  # /reload 命令，重新加载配置
+                get_status=self.get_status_info,  # /status 命令，获取详细状态
+                send_daily_report=self.send_daily_report  # /dailyreport now 命令，发送每日报告
             )
             self.logger.info("Telegram Bot 初始化完成")
             
@@ -171,13 +197,16 @@ class DomainMonitor:
             self.logger.error(f"初始化组件时发生错误：{e}")
             return False
     
-    async def run_check(self) -> None:
+    async def run_check(self, is_manual: bool = False) -> None:
         """执行一次域名检查
         
         该方法会：
         1. 检查所有配置的域名
         2. 处理检查结果
         3. 发送必要的通知
+        
+        Args:
+            is_manual: 是否为手动触发的检查（默认False为定时检查）
         
         如果上次检查还未完成，会取消它并开始新的检查
         """
@@ -195,6 +224,8 @@ class DomainMonitor:
         
         # 记录检查开始时间
         check_start_time = datetime.now()
+        self.last_check_time = check_start_time
+        self.total_checks_count += 1
         
         try:
             # 重要：每次检查前重新加载配置
@@ -228,8 +259,8 @@ class DomainMonitor:
             # 假设每批平均需要10秒（根据超时时间调整）
             estimated_seconds = batches * (self.checker.timeout + 2)
             
-            # 发送开始通知，包含预估时间
-            if show_eta:
+            # 仅在手动检查时发送开始通知
+            if is_manual and show_eta:
                 eta_minutes = estimated_seconds // 60
                 eta_seconds = estimated_seconds % 60
                 await self.bot.send_message(
@@ -324,6 +355,8 @@ class DomainMonitor:
             else:
                 next_run_time = datetime.now()  # 立即执行
             
+            self.next_check_time = next_run_time
+            
             # 如果不是批次通知模式，或需要最终汇总，发送总体通知
             if not batch_notify:
                 await self.notifier.notify_failures(
@@ -331,15 +364,36 @@ class DomainMonitor:
                     failure_threshold=notification_config.get('failure_threshold', 2),
                     notify_recovery=notification_config.get('notify_on_recovery', True),
                     notify_all_success=notification_config.get('notify_on_all_success', True),
+                    quiet_on_success=notification_config.get('quiet_on_success', False),
+                    is_manual=is_manual,
                     next_run_time=next_run_time
                 )
             else:
                 # 批次模式下只发送最终汇总
-                await self.notifier._send_check_summary(results, True, next_run_time=next_run_time)
+                await self.notifier._send_check_summary(results, True, 
+                                                       quiet_on_success=notification_config.get('quiet_on_success', False),
+                                                       is_manual=is_manual,
+                                                       next_run_time=next_run_time)
             
             # 输出统计信息
             success_count = sum(1 for r in results if r.is_success)
             failed_count = len(results) - success_count
+            
+            # 更新统计信息
+            self.last_check_results["total"] = len(results)
+            self.last_check_results["success"] = success_count
+            self.last_check_results["failed"] = failed_count
+            
+            # 统计错误类型
+            error_types = {}
+            for result in results:
+                if not result.is_success:
+                    error_type = result.status.value
+                    error_types[error_type] = error_types.get(error_type, 0) + 1
+            self.last_check_results["error_types"] = error_types
+            
+            # 更新每日统计
+            self._update_daily_stats(results)
             
             self.logger.info(f"本轮检查完成 - 成功: {success_count}, 失败: {failed_count}")
             
@@ -474,6 +528,8 @@ class DomainMonitor:
                 self.bot_task.cancel()
             if self.schedule_task and not self.schedule_task.done():
                 self.schedule_task.cancel()
+            if self.daily_report_task and not self.daily_report_task.done():
+                self.daily_report_task.cancel()
             self.logger.info("强制停止：已取消所有任务")
             return
         
@@ -491,12 +547,203 @@ class DomainMonitor:
             self.schedule_task.cancel()
             tasks.append(self.schedule_task)
         
+        if self.daily_report_task and not self.daily_report_task.done():
+            self.daily_report_task.cancel()
+            tasks.append(self.daily_report_task)
+        
         # 等待所有任务完成
         # return_exceptions=True 确保即使任务抛出异常也不会中断
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         
         self.logger.info("监控服务已停止")
+    
+    async def get_status_info(self) -> dict:
+        """获取服务状态信息
+        
+        Returns:
+            dict: 包含各种状态信息的字典
+        """
+        return {
+            'service_start_time': self.service_start_time,
+            'last_check_time': self.last_check_time,
+            'next_check_time': self.next_check_time,
+            'last_check_results': self.last_check_results,
+            'total_checks_count': self.total_checks_count,
+            'is_running': self.is_running
+        }
+    
+    def _update_daily_stats(self, results: List[CheckResult]) -> None:
+        """更新每日统计数据
+        
+        Args:
+            results: 检查结果列表
+        """
+        # 检查是否需要重置每日统计（新的一天）
+        current_date = datetime.now().date()
+        if self.daily_stats["date"] != current_date:
+            # 新的一天，重置统计
+            self.daily_stats = {
+                "date": current_date,
+                "total_checks": 0,
+                "total_domains_checked": 0,
+                "total_success": 0,
+                "total_failed": 0,
+                "error_summary": {},
+                "availability_by_domain": {}
+            }
+        
+        # 更新统计
+        self.daily_stats["total_checks"] += 1
+        self.daily_stats["total_domains_checked"] += len(results)
+        
+        for result in results:
+            domain = result.domain_name
+            
+            # 更新可用性统计
+            if domain not in self.daily_stats["availability_by_domain"]:
+                self.daily_stats["availability_by_domain"][domain] = {
+                    "total": 0,
+                    "success": 0,
+                    "failed": 0
+                }
+            
+            self.daily_stats["availability_by_domain"][domain]["total"] += 1
+            
+            if result.is_success:
+                self.daily_stats["total_success"] += 1
+                self.daily_stats["availability_by_domain"][domain]["success"] += 1
+            else:
+                self.daily_stats["total_failed"] += 1
+                self.daily_stats["availability_by_domain"][domain]["failed"] += 1
+                
+                # 更新错误类型统计
+                error_type = result.status.value
+                self.daily_stats["error_summary"][error_type] = \
+                    self.daily_stats["error_summary"].get(error_type, 0) + 1
+    
+    async def send_daily_report(self) -> None:
+        """发送每日统计报告"""
+        if not self.bot:
+            return
+        
+        stats = self.daily_stats
+        
+        # 计算总体可用率
+        total_checked = stats["total_success"] + stats["total_failed"]
+        if total_checked == 0:
+            overall_availability = 100.0
+        else:
+            overall_availability = (stats["total_success"] / total_checked) * 100
+        
+        # 构建报告消息
+        message = f"📊 **每日统计报告**\n"
+        message += f"📅 日期: {stats['date']}\n\n"
+        
+        message += f"**📈 总体统计**\n"
+        message += f"├ 检查轮次: {stats['total_checks']} 次\n"
+        message += f"├ 检查域名数: {stats['total_domains_checked']} 个次\n"
+        message += f"├ 成功: {stats['total_success']} 次\n"
+        message += f"├ 失败: {stats['total_failed']} 次\n"
+        message += f"└ 总体可用率: {overall_availability:.2f}%\n\n"
+        
+        # 错误类型统计
+        if stats["error_summary"]:
+            message += f"**❌ 错误类型分布**\n"
+            sorted_errors = sorted(stats["error_summary"].items(), 
+                                 key=lambda x: x[1], reverse=True)
+            for i, (error_type, count) in enumerate(sorted_errors):
+                is_last = i == len(sorted_errors) - 1
+                prefix = "└" if is_last else "├"
+                display_name = error_type.replace('_', ' ').title()
+                message += f"{prefix} {display_name}: {count} 次\n"
+            message += "\n"
+        
+        # 按域名的可用率统计（只显示有问题的域名）
+        problem_domains = []
+        for domain, stats_item in stats["availability_by_domain"].items():
+            if stats_item["failed"] > 0:
+                availability = (stats_item["success"] / stats_item["total"]) * 100
+                problem_domains.append((domain, availability, stats_item))
+        
+        if problem_domains:
+            # 按可用率排序（从低到高）
+            problem_domains.sort(key=lambda x: x[1])
+            
+            message += f"**⚠️ 需要关注的域名** (可用率低于100%)\n"
+            for i, (domain, availability, domain_stats) in enumerate(problem_domains[:10]):  # 只显示前10个
+                is_last = i == min(len(problem_domains) - 1, 9)
+                prefix = "└" if is_last else "├"
+                message += f"{prefix} {domain}: {availability:.1f}% "
+                message += f"(成功{domain_stats['success']}/{domain_stats['total']})\n"
+            
+            if len(problem_domains) > 10:
+                message += f"\n... 还有 {len(problem_domains) - 10} 个域名有异常记录\n"
+        else:
+            message += "**✅ 所有域名今日运行良好！**\n"
+        
+        # 发送报告
+        try:
+            await self.bot.send_message(message)
+            self.logger.info("每日统计报告已发送")
+        except Exception as e:
+            self.logger.error(f"发送每日报告失败: {e}")
+    
+    async def schedule_daily_report(self) -> None:
+        """定时发送每日报告的任务"""
+        while self.is_running:
+            try:
+                # 获取配置
+                daily_config = self.config_manager.get('daily_report', {})
+                enabled = daily_config.get('enabled', False)
+                report_time_str = daily_config.get('time', '00:00')
+                
+                if not enabled:
+                    # 如果未启用，等待1小时后再检查
+                    await asyncio.sleep(3600)
+                    continue
+                
+                # 解析报告时间
+                try:
+                    hour, minute = map(int, report_time_str.split(':'))
+                except:
+                    self.logger.error(f"无效的报告时间格式: {report_time_str}")
+                    hour, minute = 0, 0
+                
+                # 计算下次报告时间
+                now = datetime.now()
+                next_report = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+                
+                # 如果今天的报告时间已过，设置为明天
+                if next_report <= now:
+                    next_report += timedelta(days=1)
+                
+                # 等待到报告时间
+                wait_seconds = (next_report - now).total_seconds()
+                self.logger.info(f"下次每日报告时间: {next_report}, 等待 {wait_seconds/3600:.1f} 小时")
+                
+                await asyncio.sleep(wait_seconds)
+                
+                # 发送报告
+                if self.is_running:
+                    await self.send_daily_report()
+                    
+                    # 发送后重置统计数据
+                    self.daily_stats = {
+                        "date": datetime.now().date(),
+                        "total_checks": 0,
+                        "total_domains_checked": 0,
+                        "total_success": 0,
+                        "total_failed": 0,
+                        "error_summary": {},
+                        "availability_by_domain": {}
+                    }
+                
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                self.logger.error(f"每日报告任务出错: {e}")
+                await asyncio.sleep(3600)  # 出错后等待1小时
     
     async def restart_service(self) -> None:
         """重启监控服务
@@ -638,16 +885,26 @@ class DomainMonitor:
         self.logger.info(f"定时检查已启动，最大循环时间 {interval} 分钟")
         self.schedule_task = asyncio.create_task(self.schedule_checks())
         
+        # 启动每日报告任务
+        daily_config = self.config_manager.get('daily_report', {})
+        if daily_config.get('enabled', False):
+            self.logger.info(f"每日报告已启用，将在 {daily_config.get('time', '00:00')} 发送")
+            self.daily_report_task = asyncio.create_task(self.schedule_daily_report())
+        
         print("\n监控服务正在运行中...")
         print("可以在 Telegram 群组中使用 /help 查看所有命令")
         print("按 Ctrl+C 停止服务\n")
+        
+        # 收集所有任务
+        tasks = [self.bot_task, self.schedule_task]
+        if self.daily_report_task:
+            tasks.append(self.daily_report_task)
         
         try:
             # 等待所有后台任务
             # Bot 任务和调度任务会一直运行直到收到停止信号
             await asyncio.gather(
-                self.bot_task,
-                self.schedule_task,
+                *tasks,
                 return_exceptions=True
             )
         except KeyboardInterrupt:

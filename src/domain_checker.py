@@ -138,6 +138,7 @@ class DomainChecker:
         
         # HTTP连接池，复用连接以提高性能
         self._client: Optional[httpx.AsyncClient] = None
+        self._client_no_verify: Optional[httpx.AsyncClient] = None  # 不验证SSL的客户端
         self._client_lock = asyncio.Lock()
         
         # 性能统计
@@ -175,6 +176,25 @@ class DomainChecker:
                 self.logger.info(f"创建HTTP连接池，最大连接数: {self.max_concurrent}，HTTP/2: {http2_support}")
             return self._client
     
+    async def _get_client_no_verify(self) -> httpx.AsyncClient:
+        """获取不验证SSL的HTTP客户端（用于降级后的请求）"""
+        async with self._client_lock:
+            if self._client_no_verify is None:
+                # 创建不验证SSL的客户端
+                self._client_no_verify = httpx.AsyncClient(
+                    timeout=httpx.Timeout(self.timeout),
+                    follow_redirects=True,
+                    verify=False,  # 不验证SSL证书
+                    http2=False,  # 降级请求不使用HTTP/2
+                    limits=httpx.Limits(
+                        max_keepalive_connections=self.max_concurrent,
+                        max_connections=self.max_concurrent * 2,
+                        keepalive_expiry=30
+                    )
+                )
+                self.logger.info("创建不验证SSL的HTTP连接池")
+            return self._client_no_verify
+    
     async def close_client(self):
         """关闭HTTP客户端"""
         async with self._client_lock:
@@ -182,6 +202,10 @@ class DomainChecker:
                 await self._client.aclose()
                 self._client = None
                 self.logger.info("HTTP连接池已关闭")
+            if self._client_no_verify:
+                await self._client_no_verify.aclose()
+                self._client_no_verify = None
+                self.logger.info("不验证SSL的HTTP连接池已关闭")
     
     def _adjust_concurrent_by_resources(self) -> int:
         """根据系统资源自动调整并发数"""
@@ -418,17 +442,25 @@ class DomainChecker:
         original_url = url
         if not url.startswith(('http://', 'https://')):
             # 检查是否应该使用wss协议（通过域名判断）
-            if 'ws.' in url or 'websocket' in url.lower() or 'wss' in url.lower():
+            # 更严格的判断：只有明确以ws.开头的域名才视为WebSocket
+            if url.startswith('ws.'):
                 url = f'wss://{url}'
                 return await self._check_websocket(url, timeout=5 if quick_mode else self.timeout)
             else:
-                url = f'https://{url}'
+                # 如果是降级尝试，使用HTTP，否则使用HTTPS
+                url = f'http://{url}' if try_http else f'https://{url}'
         
         # 从 URL 中提取域名作为名称
         from urllib.parse import urlparse
         parsed = urlparse(url)
         name = parsed.netloc or original_url
-        expected_codes = [200, 301, 302]
+        # 扩展接受的状态码，包含更多正常的响应
+        expected_codes = [
+            200,  # OK
+            201, 202, 203, 204,  # 其他成功状态
+            301, 302, 303, 304, 307, 308,  # 各种重定向
+            401, 403,  # 认证相关（网站正常但需要登录）
+        ]
         
         start_time = datetime.now()
         
@@ -436,8 +468,13 @@ class DomainChecker:
         timeout = 5 if quick_mode else self.timeout
         
         try:
-            # 使用连接池复用的客户端
-            client = await self._get_client()
+            # 根据是否是降级请求或HTTP请求选择不同的客户端
+            if try_http or url.startswith('http://'):
+                # HTTP请求或降级请求使用不验证SSL的客户端（避免重定向到HTTPS时的SSL错误）
+                client = await self._get_client_no_verify()
+            else:
+                # HTTPS请求使用标准客户端
+                client = await self._get_client()
             response = await client.get(url)
             response_time = (datetime.now() - start_time).total_seconds()
             
@@ -529,7 +566,8 @@ class DomainChecker:
     async def check_single_domain(self, 
                                  url: str,
                                  retry_attempt: int = 0,
-                                 quick_mode: bool = False) -> CheckResult:
+                                 quick_mode: bool = False,
+                                 try_http: bool = False) -> CheckResult:
         """
         检查单个域名
         
@@ -537,6 +575,7 @@ class DomainChecker:
             url: 要检查的 URL或域名
             retry_attempt: 当前重试次数
             quick_mode: 快速模式，减少超时和重试
+            try_http: 是否尝试HTTP（用于HTTPS失败后的降级）
             
         Returns:
             CheckResult: 检查结果
@@ -549,17 +588,25 @@ class DomainChecker:
         original_url = url  # 保存原始输入
         if not url.startswith(('http://', 'https://')):
             # 检查是否应该使用wss协议（通过域名判断）
-            if 'ws.' in url or 'websocket' in url.lower() or 'wss' in url.lower():
+            # 更严格的判断：只有明确以ws.开头的域名才视为WebSocket
+            if url.startswith('ws.'):
                 url = f'wss://{url}'
                 return await self._check_websocket(url, timeout=5 if quick_mode else self.timeout)
             else:
-                url = f'https://{url}'
+                # 如果是降级尝试，使用HTTP，否则使用HTTPS
+                url = f'http://{url}' if try_http else f'https://{url}'
         
         # 从 URL 中提取域名作为名称
         from urllib.parse import urlparse
         parsed = urlparse(url)
         name = parsed.netloc or original_url  # 使用原始输入作为名称
-        expected_codes = [200, 301, 302]  # 默认接受的状态码
+        # 扩展接受的状态码，包含更多正常的响应
+        expected_codes = [
+            200,  # OK
+            201, 202, 203, 204,  # 其他成功状态
+            301, 302, 303, 304, 307, 308,  # 各种重定向
+            401, 403,  # 认证相关（网站正常但需要登录）
+        ]
         
         start_time = datetime.now()
         
@@ -569,8 +616,13 @@ class DomainChecker:
         retry_delay = 2 if quick_mode else self.retry_delay
         
         try:
-            # 使用连接池复用的客户端
-            client = await self._get_client()
+            # 根据是否是降级请求或HTTP请求选择不同的客户端
+            if try_http or url.startswith('http://'):
+                # HTTP请求或降级请求使用不验证SSL的客户端（避免重定向到HTTPS时的SSL错误）
+                client = await self._get_client_no_verify()
+            else:
+                # HTTPS请求使用标准客户端
+                client = await self._get_client()
             response = await client.get(url)
             response_time = (datetime.now() - start_time).total_seconds()
             
@@ -621,15 +673,40 @@ class DomainChecker:
                     status=status,
                     error_message=error_msg
                 )
+            elif "SSL" in error_msg or "certificate" in error_msg.lower():
+                # SSL错误应该被单独处理
+                status = CheckStatus.SSL_ERROR
+                self.logger.error(f"域名 {name} ({url}) SSL 证书错误：{error_msg}")
+                
+                # SSL错误时，如果还没尝试过HTTP，尝试降级到HTTP
+                if url.startswith('https://') and not try_http:
+                    self.logger.info(f"域名 {name} SSL证书错误，尝试降级到HTTP")
+                    # 如果原始URL带有https://，需要替换为http://
+                    http_url = original_url.replace('https://', 'http://') if original_url.startswith('https://') else original_url
+                    return await self.check_single_domain(http_url, 0, quick_mode, try_http=True)
+                
+                return CheckResult(
+                    domain_name=name,
+                    url=url,
+                    status=status,
+                    error_message=error_msg
+                )
             else:
                 status = CheckStatus.CONNECTION_ERROR
                 self.logger.error(f"域名 {name} ({url}) 连接失败：{error_msg}")
+                
+                # 如果是HTTPS连接失败，且还没尝试过HTTP，尝试降级到HTTP
+                if url.startswith('https://') and not try_http and retry_attempt == 0:
+                    self.logger.info(f"域名 {name} HTTPS连接失败，尝试降级到HTTP")
+                    # 如果原始URL带有https://，需要替换为http://
+                    http_url = original_url.replace('https://', 'http://') if original_url.startswith('https://') else original_url
+                    return await self.check_single_domain(http_url, 0, quick_mode, try_http=True)
                 
                 # 连接错误可能是暂时的，可以重试
                 if retry_attempt < max_retries:
                     self.logger.info(f"域名 {name} 将在 {retry_delay} 秒后进行第 {retry_attempt + 1} 次重试")
                     await asyncio.sleep(retry_delay)
-                    return await self.check_single_domain(url, retry_attempt + 1, quick_mode)
+                    return await self.check_single_domain(url, retry_attempt + 1, quick_mode, try_http)
                 
                 return CheckResult(
                     domain_name=name,
@@ -645,7 +722,7 @@ class DomainChecker:
             if retry_attempt < max_retries:
                 self.logger.info(f"域名 {name} 将在 {retry_delay} 秒后进行第 {retry_attempt + 1} 次重试")
                 await asyncio.sleep(retry_delay)
-                return await self.check_single_domain(url, retry_attempt + 1, quick_mode)
+                return await self.check_single_domain(url, retry_attempt + 1, quick_mode, try_http)
             
             # 构建详细的超时错误信息
             retry_info = f"" if retry_attempt == 0 else f"，已重试{retry_attempt}次"
@@ -662,7 +739,7 @@ class DomainChecker:
             if retry_attempt < max_retries:
                 self.logger.info(f"域名 {name} 将在 {retry_delay} 秒后进行第 {retry_attempt + 1} 次重试")
                 await asyncio.sleep(retry_delay)
-                return await self.check_single_domain(url, retry_attempt + 1, quick_mode)
+                return await self.check_single_domain(url, retry_attempt + 1, quick_mode, try_http)
             
             # 构建详细的超时错误信息
             retry_info = f"" if retry_attempt == 0 else f"，已重试{retry_attempt}次"
@@ -678,6 +755,14 @@ class DomainChecker:
             if "SSL" in error_msg or "certificate" in error_msg.lower():
                 status = CheckStatus.SSL_ERROR
                 self.logger.error(f"域名 {name} ({url}) SSL 证书错误：{error_msg}")
+                
+                # SSL错误时，如果还没尝试过HTTP，尝试降级到HTTP
+                if url.startswith('https://') and not try_http:
+                    self.logger.info(f"域名 {name} SSL证书错误，尝试降级到HTTP")
+                    # 如果原始URL带有https://，需要替换为http://
+                    http_url = original_url.replace('https://', 'http://') if original_url.startswith('https://') else original_url
+                    return await self.check_single_domain(http_url, 0, quick_mode, try_http=True)
+                
                 # SSL错误通常是配置问题，不重试
                 return CheckResult(
                     domain_name=name,
