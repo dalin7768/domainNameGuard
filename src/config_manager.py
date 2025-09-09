@@ -39,7 +39,13 @@ class ConfigManager:
         Args:
             config_file: 配置文件路径，默认为 config.json
         """
-        self.config_file = Path(config_file)  # 转换为 Path 对象，方便路径操作
+        # 如果没有指定绝对路径，则使用项目根目录的config.json
+        if not Path(config_file).is_absolute():
+            # 获取项目根目录（src的父目录）
+            project_root = Path(__file__).parent.parent
+            self.config_file = project_root / config_file
+        else:
+            self.config_file = Path(config_file)  # 转换为 Path 对象，方便路径操作
         self.config: Dict[str, Any] = {}  # 存储配置的字典
         self.lock = threading.RLock()  # 可重入锁，支持嵌套加锁
         self.logger = logging.getLogger(__name__)
