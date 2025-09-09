@@ -47,7 +47,7 @@ class TelegramBot:
             '/remove': self.cmd_remove_domain,
             '/clear': self.cmd_clear_domains,
             '/check': self.cmd_check_now,
-            '/config': self.cmd_show_config,
+            '/config': self.cmd_help,  # 重定向到 /help
             '/interval': self.cmd_set_interval,
             '/timeout': self.cmd_set_timeout,
             '/retry': self.cmd_set_retry,
@@ -266,58 +266,64 @@ class TelegramBot:
     
     # 命令处理函数
     async def cmd_help(self, args: str, msg_id: int, user_id: int, username: str):
-        """帮助命令"""
-        help_text = """📚 **域名监控机器人命令**
+        """帮助和配置命令"""
+        # 获取当前配置信息
+        check_config = self.config_manager.get('check', {})
+        notification_config = self.config_manager.get('notification', {})
+        domains = self.config_manager.get_domains()
+        
+        help_text = f"""📚 **域名监控机器人帮助**
+
+⚙️ **当前配置**:
+• 监控域名: {len(domains)} 个
+• 检查间隔: {check_config.get('interval_minutes', 30)} 分钟
+• 超时时间: {check_config.get('timeout_seconds', 10)} 秒
+• 并发数: {check_config.get('max_concurrent', 10)} 个
+• 重试次数: {check_config.get('retry_count', 2)} 次
+• 静默模式: {'开启' if notification_config.get('quiet_on_success', False) else '关闭'}
+• 自适应并发: {'开启' if check_config.get('auto_adjust_concurrent', True) else '关闭'}
 
 🌟 **基础命令**:
-`/help` - 显示此帮助信息
-`/start` - 开始使用机器人
-`/status` - 查看监控状态
+`/help` - 显示帮助和配置信息
+`/status` - 查看详细监控状态
+`/check` - 立即执行域名检查
 
-📝 **域名管理** *(热更新)*:
+📝 **域名管理**:
 `/list` - 查看所有监控域名
 `/add example.com` - 添加域名（支持批量）
 `/remove example.com` - 删除域名（支持批量）
 `/clear` - 清空所有域名
 
-🔍 **监控控制**:
-`/check` - 立即执行域名检查
-`/reload` - 重新加载配置文件
+🔧 **配置调整**:
+`/interval 10` - 设置检查间隔（分钟）
+`/timeout 15` - 设置超时时间（秒）
+`/retry 3` - 设置重试次数
+`/concurrent 20` - 设置并发数
+`/threshold 3` - 设置失败阈值
+`/cooldown 30` - 设置通知冷却（分钟）
+`/quiet` - 切换静默模式
+`/recovery` - 切换恢复通知
+`/allsuccess` - 切换全部正常通知
+`/autoadjust` - 切换自适应并发
+
+🔄 **服务控制**:
+`/reload` - 重新加载配置
 `/restart` - 重启监控服务
 `/stop` - 停止监控服务
 
-⚙️ **配置管理**:
-`/config` - 显示当前配置
-`/interval 10` - 设置检查间隔 *(热更新)*
-`/timeout 15` - 设置超时时间 *(热更新)*
-`/retry 3` - 设置重试次数 *(热更新)*
-`/concurrent 20` - 设置并发线程数 *(热更新)*
-`/threshold 3` - 设置失败阈值 *(热更新)*
-`/cooldown 30` - 设置通知冷却时间 *(热更新)*
-`/recovery` - 切换恢复通知 *(热更新)*
-`/allsuccess` - 切换全部正常通知 *(热更新)*
-`/autoadjust` - 切换自适应并发 *(热更新)*
-`/quiet` - 切换静默模式 *(热更新)*
-
 📊 **统计报告**:
-`/dailyreport` - 管理每日统计报告
-`/dailyreport now` - 立即发送今日报告
+`/dailyreport` - 管理每日报告
+`/dailyreport now` - 立即发送报告
 
-👥 **管理员设置** *(需重启)*:
-`/admin list` - 查看管理员列表
-`/admin add 123456` - 添加管理员
-`/admin remove 123456` - 删除管理员
+👥 **管理员**:
+`/admin list` - 查看管理员
+`/admin add/remove ID` - 管理管理员
 
-🎯 **批量操作示例**:
-`/add google.com baidu.com github.com`
-`/remove site1.com site2.com`
-
-💡 **提示**:
-• 标记 *(热更新)* 的配置立即生效
-• 标记 *(需重启)* 的配置需要重启服务
-• 域名不需要添加 http:// 前缀
-• 支持空格或逗号分隔多个域名
-• 部分命令需要管理员权限"""
+💡 **使用说明**:
+• 支持批量操作，用空格或逗号分隔
+• 域名无需 http:// 前缀
+• 支持 WebSocket (wss://) 域名
+• 配置修改立即生效，无需重启"""
         
         await self.send_message(help_text, reply_to=msg_id)
     
@@ -420,7 +426,7 @@ class TelegramBot:
         status_text += "\n💡 **快速操作**\n"
         status_text += "├ /list - 查看域名列表\n"
         status_text += "├ /check - 立即检查\n"
-        status_text += "└ /config - 查看配置"
+        status_text += "└ /help - 查看帮助和配置"
         
         await self.send_message(status_text, reply_to=msg_id)
     
@@ -572,10 +578,11 @@ class TelegramBot:
         else:
             await self.send_message("❌ 检查功能未就绪", reply_to=msg_id)
     
-    async def cmd_show_config(self, args: str, msg_id: int, user_id: int, username: str):
-        """显示配置命令"""
-        summary = self.config_manager.get_config_summary()
-        await self.send_message(summary, reply_to=msg_id)
+    # cmd_show_config 功能已合并到 cmd_help
+    # async def cmd_show_config(self, args: str, msg_id: int, user_id: int, username: str):
+    #     """显示配置命令"""
+    #     summary = self.config_manager.get_config_summary()
+    #     await self.send_message(summary, reply_to=msg_id)
     
     async def cmd_set_interval(self, args: str, msg_id: int, user_id: int, username: str):
         """设置检查间隔"""
