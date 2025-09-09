@@ -766,26 +766,26 @@ class DomainChecker:
             else:
                 status = CheckStatus.CONNECTION_ERROR
                 self.logger.error(f"域名 {name} ({url}) 连接失败：{error_msg}")
-                
-                # 如果是HTTPS连接失败，且还没尝试过HTTP，尝试降级到HTTP
-                if url.startswith('https://') and not try_http and retry_attempt == 0:
-                    self.logger.info(f"域名 {name} HTTPS连接失败，尝试降级到HTTP")
-                    # 如果原始URL带有https://，需要替换为http://
-                    http_url = original_url.replace('https://', 'http://') if original_url.startswith('https://') else original_url
-                    return await self.check_single_domain(http_url, 0, quick_mode, try_http=True)
-                
-                # 连接错误可能是暂时的，可以重试
-                if retry_attempt < max_retries:
-                    self.logger.info(f"域名 {name} 将在 {retry_delay} 秒后进行第 {retry_attempt + 1} 次重试")
-                    await asyncio.sleep(retry_delay)
-                    return await self.check_single_domain(url, retry_attempt + 1, quick_mode, try_http)
-                
-                return CheckResult(
-                    domain_name=name,
-                    url=url,
-                    status=status,
-                    error_message=error_msg
-                )
+            
+            # 如果是HTTPS连接失败，且还没尝试过HTTP，尝试降级到HTTP
+            if url.startswith('https://') and not try_http and retry_attempt == 0:
+                self.logger.info(f"域名 {name} HTTPS连接失败，尝试降级到HTTP")
+                # 如果原始URL带有https://，需要替换为http://
+                http_url = original_url.replace('https://', 'http://') if original_url.startswith('https://') else original_url
+                return await self.check_single_domain(http_url, 0, quick_mode, try_http=True)
+            
+            # 连接错误可能是暂时的，可以重试
+            if retry_attempt < max_retries:
+                self.logger.info(f"域名 {name} 将在 {retry_delay} 秒后进行第 {retry_attempt + 1} 次重试")
+                await asyncio.sleep(retry_delay)
+                return await self.check_single_domain(url, retry_attempt + 1, quick_mode, try_http)
+            
+            return CheckResult(
+                domain_name=name,
+                url=url,
+                status=status,
+                error_message=error_msg
+            )
             
         except httpx.TimeoutException:
             self.logger.error(f"域名 {name} ({url}) 请求超时")
