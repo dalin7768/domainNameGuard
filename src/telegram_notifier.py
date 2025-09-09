@@ -267,10 +267,10 @@ class TelegramNotifier:
         # 构建汇总消息
         if failed_count == 0:
             # 全部正常
-            message = f"✅ **检查完成**\n\n"
-            message += f"🔍 已检查 **{total_count}** 个域名\n"
-            message += f"🌟 全部正常运行\n"
-            message += f"⏰ {datetime.now().strftime('%H:%M:%S')}\n\n"
+            message = f"✅ **全部正常**\n\n"
+            message += f"🔍 检查域名: {total_count} 个\n"
+            message += f"🌟 状态: 全部在线\n"
+            message += f"⏰ 时间: {datetime.now().strftime('%H:%M:%S')}\n\n"
             
             # 添加下次执行时间
             if next_run_time:
@@ -283,141 +283,154 @@ class TelegramNotifier:
                 else:
                     message += f"⏰ 下次检查将立即开始"
         else:
-            # 有异常域名，按错误类型分组
+            # 有异常域名，按更细致的错误类型分组
             error_groups = defaultdict(list)
             for result in results:
                 if not result.is_success:
-                    error_groups[result.status].append(result)
+                    # 对HTTP错误进行更细致的分类
+                    if result.status == CheckStatus.HTTP_ERROR and result.status_code:
+                        # 按状态码范围分组
+                        if result.status_code in [520, 521, 522, 523, 524, 525, 526]:
+                            error_groups['cloudflare_error'].append(result)
+                        elif result.status_code in [502, 503, 504]:
+                            error_groups['gateway_error'].append(result)
+                        elif result.status_code == 500:
+                            error_groups['server_error'].append(result)
+                        elif result.status_code in [403, 401, 451]:
+                            error_groups['access_denied'].append(result)
+                        elif result.status_code == 404:
+                            error_groups['not_found'].append(result)
+                        elif result.status_code in [400, 429]:
+                            error_groups['bad_request'].append(result)
+                        else:
+                            error_groups[f'http_{result.status_code}'].append(result)
+                    else:
+                        error_groups[result.status].append(result)
             
-            message = f"⚠️ **域名检查完成**\n\n"
-            message += f"📊 **统计信息**\n"
-            message += f"🔍 检查总数: {total_count} 个\n"
-            message += f"✅ 正常: {success_count} 个\n"
-            message += f"❌ 异常: {failed_count} 个\n\n"
+            message = f"⚠️ **检查结果**\n\n"
+            message += f"📊 **整体状态**\n"
+            message += f"🔍 检查域名: {total_count} 个\n"
+            message += f"✅ 正常在线: {success_count} 个\n"
+            message += f"❌ 异常域名: {failed_count} 个\n\n"
             
-            # 按错误类型显示
+            # 按错误类型显示（更细致的分类）
             error_names = {
-                CheckStatus.DNS_ERROR: ("🔍", "DNS解析错误"),
-                CheckStatus.CONNECTION_ERROR: ("🔌", "连接失败"),
-                CheckStatus.TIMEOUT: ("⏱️", "请求超时"),
-                CheckStatus.HTTP_ERROR: ("❌", "HTTP错误"),
-                CheckStatus.SSL_ERROR: ("🔒", "SSL证书错误"),
-                CheckStatus.UNKNOWN_ERROR: ("❓", "其他错误")
+                CheckStatus.DNS_ERROR: ("🔍", "DNS解析失败"),
+                CheckStatus.CONNECTION_ERROR: ("🔌", "无法建立连接"),
+                CheckStatus.TIMEOUT: ("⏱️", "访问超时"),
+                CheckStatus.SSL_ERROR: ("🔒", "SSL证书问题"),
+                CheckStatus.WEBSOCKET_ERROR: ("🌐", "WebSocket连接失败"),
+                CheckStatus.PHISHING_WARNING: ("🎣", "钓鱼网站警告"),
+                CheckStatus.SECURITY_WARNING: ("🚨", "安全风险警告"),
+                CheckStatus.UNKNOWN_ERROR: ("❓", "未知错误"),
+                # HTTP细分类型
+                'cloudflare_error': ("☁️", "Cloudflare错误"),
+                'gateway_error': ("🚪", "网关错误"),
+                'server_error': ("💥", "服务器内部错误"),
+                'access_denied': ("🚫", "访问被拒绝"),
+                'not_found': ("🔎", "页面不存在"),
+                'bad_request': ("⚠️", "请求错误")
             }
             
             # 收集所有错误域名信息
             error_messages = []
-            current_message = f"⚠️ **域名检查完成**\n\n"
-            current_message += f"📊 **统计信息**\n"
-            current_message += f"🔍 检查总数: {total_count} 个\n"
-            current_message += f"✅ 正常: {success_count} 个\n"
-            current_message += f"❌ 异常: {failed_count} 个\n\n"
+            current_message = f"⚠️ **检查结果**\n\n"
+            current_message += f"📊 **整体状态**\n"
+            current_message += f"🔍 检查域名: {total_count} 个\n"
+            current_message += f"✅ 正常在线: {success_count} 个\n"
+            current_message += f"❌ 异常域名: {failed_count} 个\n\n"
             
-            for status, domains in error_groups.items():
-                emoji, name = error_names.get(status, ("⚠️", "错误"))
+            # 定义显示顺序
+            display_order = [
+                'cloudflare_error', 'gateway_error', 'server_error', 
+                'access_denied', 'not_found', 'bad_request',
+                CheckStatus.DNS_ERROR, CheckStatus.CONNECTION_ERROR, 
+                CheckStatus.TIMEOUT, CheckStatus.SSL_ERROR,
+                CheckStatus.WEBSOCKET_ERROR, CheckStatus.PHISHING_WARNING,
+                CheckStatus.SECURITY_WARNING, CheckStatus.UNKNOWN_ERROR
+            ]
+            
+            # 按照定义的顺序显示错误组
+            for status in display_order:
+                if status not in error_groups:
+                    continue
+                    
+                domains = error_groups[status]
+                emoji, name = error_names.get(status, ("⚠️", f"HTTP {status.replace('http_', '')}"))
                 domain_count = len(domains)
                 
+                # 根据错误类型构建详细说明
+                detail_info = ""
+                if status == 'cloudflare_error':
+                    # 收集所有Cloudflare状态码
+                    cf_codes = defaultdict(list)
+                    for r in domains:
+                        cf_codes[r.status_code].append(r.domain_name)
+                    detail_info = " ("
+                    details = []
+                    for code, names in cf_codes.items():
+                        if code == 522:
+                            details.append(f"522连接超时")
+                        elif code == 521:
+                            details.append(f"521服务器离线")
+                        elif code == 520:
+                            details.append(f"520未知错误")
+                        elif code == 523:
+                            details.append(f"523源站不可达")
+                        elif code == 524:
+                            details.append(f"524超时")
+                        elif code == 525:
+                            details.append(f"525SSL握手失败")
+                        elif code == 526:
+                            details.append(f"526SSL证书无效")
+                    detail_info += ", ".join(details) + ")"
+                elif status == 'gateway_error':
+                    gw_codes = defaultdict(list)
+                    for r in domains:
+                        gw_codes[r.status_code].append(r.domain_name)
+                    detail_info = " ("
+                    details = []
+                    for code in sorted(gw_codes.keys()):
+                        if code == 502:
+                            details.append("502坏网关")
+                        elif code == 503:
+                            details.append("503服务暂不可用")
+                        elif code == 504:
+                            details.append("504网关超时")
+                    detail_info += ", ".join(details) + ")"
+                elif status == 'access_denied':
+                    ac_codes = defaultdict(list)
+                    for r in domains:
+                        ac_codes[r.status_code].append(r.domain_name)
+                    detail_info = " ("
+                    details = []
+                    for code in sorted(ac_codes.keys()):
+                        if code == 401:
+                            details.append("401未授权")
+                        elif code == 403:
+                            details.append("403禁止访问")
+                        elif code == 451:
+                            details.append("451法律原因")
+                    detail_info += ", ".join(details) + ")"
+                
                 # 添加错误类型标题
-                section_header = f"**{emoji} {name} ({domain_count}个):**\n"
+                section_header = f"**{emoji} {name}{detail_info} ({domain_count}个):**\n"
                 
                 # 检查是否需要新消息
-                if len(current_message) + len(section_header) > 3500:  # 留一些空间给结尾
+                if len(current_message) + len(section_header) > 3500:
                     error_messages.append(current_message)
-                    current_message = f"⚠️ **域名检查详情（续）**\n\n"
+                    current_message = f"⚠️ **错误详情（续）**\n\n"
                 
                 current_message += section_header
                 
-                # 显示所有域名
+                # 显示域名列表
                 for result in domains:
-                    clickable_url = result.url if result.url.startswith('http') else f"https://{result.domain_name}"
-                    
-                    # 构建错误详情
-                    error_details = []
-                    
-                    # HTTP错误显示状态码和具体错误描述
-                    if status == CheckStatus.HTTP_ERROR and result.status_code:
-                        # 获取HTTP错误的具体描述
-                        if result.status_code == 522:
-                            error_details.append("522 连接超时")
-                        elif result.status_code == 521:
-                            error_details.append("521 Web服务器宕机")
-                        elif result.status_code == 520:
-                            error_details.append("520 未知错误")
-                        elif result.status_code == 523:
-                            error_details.append("523 源站不可达")
-                        elif result.status_code == 524:
-                            error_details.append("524 超时发生")
-                        elif result.status_code == 525:
-                            error_details.append("525 SSL握手失败")
-                        elif result.status_code == 526:
-                            error_details.append("526 无效SSL证书")
-                        elif result.status_code == 502:
-                            error_details.append("502 网关错误")
-                        elif result.status_code == 503:
-                            error_details.append("503 服务不可用")
-                        elif result.status_code == 504:
-                            error_details.append("504 网关超时")
-                        elif result.status_code == 500:
-                            error_details.append("500 服务器内部错误")
-                        elif result.status_code == 404:
-                            error_details.append("404 页面不存在")
-                        elif result.status_code == 403:
-                            error_details.append("403 禁止访问")
-                        elif result.status_code == 401:
-                            error_details.append("401 未授权")
-                        elif result.status_code == 400:
-                            error_details.append("400 错误请求")
-                        elif result.status_code == 429:
-                            error_details.append("429 请求过多")
-                        elif result.status_code == 451:
-                            error_details.append("451 法律原因不可用")
-                        else:
-                            error_details.append(f"{result.status_code}")
-                    
-                    # 钓鱼网站警告
-                    elif status == CheckStatus.PHISHING_WARNING:
-                        error_details.append("钓鱼网站")
-                    
-                    # 安全警告（爆红）
-                    elif status == CheckStatus.SECURITY_WARNING:
-                        error_details.append("安全警告/爆红")
-                    
-                    # 超时错误显示具体信息
-                    elif status == CheckStatus.TIMEOUT and result.error_message:
-                        if "连接建立超时" in result.error_message:
-                            error_details.append("连接超时")
-                        elif "请求超时" in result.error_message:
-                            error_details.append("请求超时")
-                        else:
-                            error_details.append("超时")
-                    
-                    # SSL错误
-                    elif status == CheckStatus.SSL_ERROR:
-                        error_details.append("SSL证书错误")
-                    
-                    # DNS错误
-                    elif status == CheckStatus.DNS_ERROR:
-                        error_details.append("DNS解析失败")
-                    
-                    # 连接错误
-                    elif status == CheckStatus.CONNECTION_ERROR:
-                        error_details.append("连接失败")
-                    
-                    # WebSocket错误
-                    elif status == CheckStatus.WEBSOCKET_ERROR:
-                        error_details.append("WebSocket连接失败")
-                    
-                    # 构建域名行
-                    if error_details:
-                        domain_line = f"  • {result.domain_name} ({', '.join(error_details)})\n"
-                    else:
-                        domain_line = f"  • {result.domain_name}\n"
-                    
+                    domain_line = f"  • {result.domain_name}\n"
+                        
                     # 检查是否会超过消息长度限制
                     if len(current_message) + len(domain_line) > 3500:
-                        # 保存当前消息并开始新消息
                         error_messages.append(current_message + "\n")
-                        current_message = f"⚠️ **域名检查详情（续）**\n\n"
+                        current_message = f"⚠️ **错误详情（续）**\n\n"
                         current_message += f"**{emoji} {name}（续）:**\n"
                     
                     current_message += domain_line
@@ -487,43 +500,51 @@ class TelegramNotifier:
             return
         
         # 构建消息
-        message = "🔔 **智能通知**\n\n"
+        message = "🔔 **状态变化通知**\n\n"
         
         # 新增错误
         if new_errors:
-            message += f"⚠️ **新增错误 ({len(new_errors)}个)**:\n"
+            message += f"🆕 **新出现问题 ({len(new_errors)}个)**:\n"
             for error in new_errors[:10]:  # 最多显示10个
-                message += f"• {error.domain_name} - {error.status.value}\n"
-                if error.error_message:
-                    message += f"  原因: {error.error_message[:50]}\n"
+                status_desc = {
+                    'DNS_ERROR': 'DNS异常',
+                    'CONNECTION_ERROR': '连接失败',
+                    'TIMEOUT': '响应超时',
+                    'HTTP_ERROR': 'HTTP错误',
+                    'SSL_ERROR': 'SSL问题',
+                    'WEBSOCKET_ERROR': 'WebSocket异常',
+                    'PHISHING_WARNING': '钓鱼警告',
+                    'SECURITY_WARNING': '安全警告'
+                }.get(error.status.value, error.status.value)
+                message += f"• {error.domain_name} - {status_desc}\n"
             if len(new_errors) > 10:
-                message += f"• ... 还有 {len(new_errors) - 10} 个\n"
+                message += f"• ... 及其他 {len(new_errors) - 10} 个\n"
             message += "\n"
         
         # 已恢复
         if recovered:
-            message += f"✅ **已恢复 ({len(recovered)}个)**:\n"
+            message += f"✅ **已恢复正常 ({len(recovered)}个)**:\n"
             for rec in recovered[:10]:
                 message += f"• {rec.domain_name}\n"
             if len(recovered) > 10:
-                message += f"• ... 还有 {len(recovered) - 10} 个\n"
+                message += f"• ... 及其他 {len(recovered) - 10} 个\n"
             message += "\n"
         
         # 持续错误提醒
         unack_count = len([e for e in persistent_errors if e.domain_name not in [r.domain_name for r in recovered]])
         if unack_count > 0:
-            message += f"🔴 **持续错误**: {unack_count} 个域名仍有问题\n"
-            message += "使用 `/errors` 查看详情\n\n"
+            message += f"🔴 **持续异常**: 仍有 {unack_count} 个域名未恢复\n"
+            message += "输入 `/errors` 查看完整列表\n\n"
         
         # 总体统计
         total_count = len(total_results)
         failed_count = len([r for r in total_results if not r.is_success])
         success_count = total_count - failed_count
         
-        message += f"📊 **当前状态**:\n"
-        message += f"• 总数: {total_count}\n"
-        message += f"• 正常: {success_count}\n"
-        message += f"• 异常: {failed_count}\n\n"
+        message += f"📊 **当前总体**:\n"
+        message += f"• 监控总数: {total_count}\n"
+        message += f"• 在线正常: {success_count}\n"
+        message += f"• 异常域名: {failed_count}\n\n"
         
         # 时间信息
         message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"

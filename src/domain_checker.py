@@ -516,9 +516,26 @@ class DomainChecker:
                 
         except httpx.ConnectError as e:
             error_msg = str(e)
-            if "Name or service not known" in error_msg or "getaddrinfo failed" in error_msg:
+            # 更详细的DNS错误判断
+            if any(dns_err in error_msg.lower() for dns_err in 
+                   ['name or service not known', 'getaddrinfo failed', 'nodename nor servname', 
+                    'cannot resolve', 'no such host', 'temporary failure in name resolution',
+                    'dns lookup failed', 'nxdomain']):
                 status = CheckStatus.DNS_ERROR
                 self.logger.error(f"域名 {name} ({url}) DNS 解析失败：{error_msg}")
+            # 连接被拒绝
+            elif 'connection refused' in error_msg.lower():
+                status = CheckStatus.CONNECTION_ERROR
+                self.logger.error(f"域名 {name} ({url}) 连接被拒绝（服务未启动或端口关闭）：{error_msg}")
+            # 网络不可达
+            elif any(net_err in error_msg.lower() for net_err in 
+                   ['network unreachable', 'no route to host', 'host is unreachable']):
+                status = CheckStatus.CONNECTION_ERROR
+                self.logger.error(f"域名 {name} ({url}) 网络不可达：{error_msg}")
+            # 连接重置
+            elif 'connection reset' in error_msg.lower():
+                status = CheckStatus.CONNECTION_ERROR
+                self.logger.error(f"域名 {name} ({url}) 连接被重置：{error_msg}")
             else:
                 status = CheckStatus.CONNECTION_ERROR
                 self.logger.error(f"域名 {name} ({url}) 连接失败：{error_msg}")
@@ -530,29 +547,65 @@ class DomainChecker:
                 error_message=error_msg
             )
             
-        except httpx.TimeoutException:
-            self.logger.error(f"域名 {name} ({url}) 请求超时")
-            return CheckResult(
-                domain_name=name,
-                url=url,
-                status=CheckStatus.TIMEOUT,
-                error_message=f"请求超时（{timeout}秒，未重试）"
-            )
+        except httpx.TimeoutException as e:
+            error_msg = str(e)
+            # 区分不同类型的超时
+            if isinstance(e, httpx.ConnectTimeout):
+                self.logger.error(f"域名 {name} ({url}) 连接建立超时")
+                timeout_msg = f"连接建立超时（{timeout}秒，未重试）"
+            elif isinstance(e, httpx.ReadTimeout):
+                self.logger.error(f"域名 {name} ({url}) 读取响应超时")
+                timeout_msg = f"读取响应超时（{timeout}秒，未重试）"
+            elif isinstance(e, httpx.WriteTimeout):
+                self.logger.error(f"域名 {name} ({url}) 发送请求超时")
+                timeout_msg = f"发送请求超时（{timeout}秒，未重试）"
+            elif isinstance(e, httpx.PoolTimeout):
+                self.logger.error(f"域名 {name} ({url}) 连接池超时")
+                timeout_msg = f"连接池超时（{timeout}秒，未重试）"
+            else:
+                self.logger.error(f"域名 {name} ({url}) 请求超时")
+                timeout_msg = f"请求超时（{timeout}秒，未重试）"
             
-        except httpx.ConnectTimeout:
-            self.logger.error(f"域名 {name} ({url}) 连接超时")
             return CheckResult(
                 domain_name=name,
                 url=url,
                 status=CheckStatus.TIMEOUT,
-                error_message=f"连接建立超时（{timeout}秒，未重试）"
+                error_message=timeout_msg
             )
             
         except Exception as e:
             error_msg = str(e)
-            if "SSL" in error_msg or "certificate" in error_msg.lower():
+            error_lower = error_msg.lower()
+            
+            # SSL/TLS相关错误
+            if any(ssl_err in error_lower for ssl_err in 
+                   ['ssl', 'tls', 'certificate', 'cert', 'handshake', 
+                    'verification', 'verify failed', 'self signed', 'expired']):
                 status = CheckStatus.SSL_ERROR
-                self.logger.error(f"域名 {name} ({url}) SSL 证书错误：{error_msg}")
+                # 识别具体的SSL问题
+                if 'expired' in error_lower:
+                    self.logger.error(f"域名 {name} ({url}) SSL 证书已过期：{error_msg}")
+                elif 'self signed' in error_lower or 'self-signed' in error_lower:
+                    self.logger.error(f"域名 {name} ({url}) 使用自签名证书：{error_msg}")
+                elif 'verification' in error_lower or 'verify' in error_lower:
+                    self.logger.error(f"域名 {name} ({url}) SSL 证书验证失败：{error_msg}")
+                elif 'handshake' in error_lower:
+                    self.logger.error(f"域名 {name} ({url}) SSL 握手失败：{error_msg}")
+                else:
+                    self.logger.error(f"域名 {name} ({url}) SSL 证书错误：{error_msg}")
+            # 代理相关错误
+            elif any(proxy_err in error_lower for proxy_err in 
+                   ['proxy', 'socks', 'authentication required']):
+                status = CheckStatus.CONNECTION_ERROR
+                self.logger.error(f"域名 {name} ({url}) 代理连接问题：{error_msg}")
+            # 协议错误
+            elif 'unsupported protocol' in error_lower or 'protocol error' in error_lower:
+                status = CheckStatus.CONNECTION_ERROR
+                self.logger.error(f"域名 {name} ({url}) 协议不支持或错误：{error_msg}")
+            # 编码错误
+            elif 'codec' in error_lower or 'decode' in error_lower:
+                status = CheckStatus.UNKNOWN_ERROR
+                self.logger.error(f"域名 {name} ({url}) 响应解码错误：{error_msg}")
             else:
                 status = CheckStatus.UNKNOWN_ERROR
                 self.logger.error(f"域名 {name} ({url}) 检查时发生未知错误：{error_msg}")
@@ -692,6 +745,24 @@ class DomainChecker:
                     status=status,
                     error_message=error_msg
                 )
+            # 连接被拒绝
+            elif 'connection refused' in error_msg.lower() or 'actively refused' in error_msg.lower():
+                status = CheckStatus.CONNECTION_ERROR
+                self.logger.error(f"域名 {name} ({url}) 连接被拒绝（服务未启动或端口关闭）：{error_msg}")
+            # 网络不可达
+            elif any(net_err in error_msg.lower() for net_err in 
+                   ['network unreachable', 'no route to host', 'host is unreachable', 'network is unreachable']):
+                status = CheckStatus.CONNECTION_ERROR
+                self.logger.error(f"域名 {name} ({url}) 网络不可达：{error_msg}")
+            # 连接重置
+            elif 'connection reset' in error_msg.lower() or 'reset by peer' in error_msg.lower():
+                status = CheckStatus.CONNECTION_ERROR
+                self.logger.error(f"域名 {name} ({url}) 连接被重置：{error_msg}")
+            # 连接中断
+            elif any(abort_err in error_msg.lower() for abort_err in 
+                   ['connection aborted', 'broken pipe', 'connection lost']):
+                status = CheckStatus.CONNECTION_ERROR
+                self.logger.error(f"域名 {name} ({url}) 连接中断：{error_msg}")
             else:
                 status = CheckStatus.CONNECTION_ERROR
                 self.logger.error(f"域名 {name} ({url}) 连接失败：{error_msg}")
@@ -771,16 +842,30 @@ class DomainChecker:
                     status=status,
                     error_message=error_msg
                 )
+            # 代理错误
+            elif any(proxy_err in error_msg.lower() for proxy_err in 
+                   ['proxy', 'socks', 'authentication required']):
+                status = CheckStatus.CONNECTION_ERROR
+                self.logger.error(f"域名 {name} ({url}) 代理连接问题：{error_msg}")
+            # 协议错误
+            elif 'unsupported protocol' in error_msg.lower() or 'protocol error' in error_msg.lower():
+                status = CheckStatus.CONNECTION_ERROR
+                self.logger.error(f"域名 {name} ({url}) 协议不支持或错误：{error_msg}")
+            # 编码错误
+            elif 'codec' in error_msg.lower() or 'decode' in error_msg.lower():
+                status = CheckStatus.UNKNOWN_ERROR
+                self.logger.error(f"域名 {name} ({url}) 响应编码错误：{error_msg}")
             else:
                 status = CheckStatus.UNKNOWN_ERROR
                 self.logger.error(f"域名 {name} ({url}) 检查时发生未知错误：{error_msg}")
-                # 未知错误不重试，避免浪费时间
-                return CheckResult(
-                    domain_name=name,
-                    url=url,
-                    status=status,
-                    error_message=error_msg
-                )
+                
+            # 对于未知错误和编码错误，不重试，避免浪费时间
+            return CheckResult(
+                domain_name=name,
+                url=url,
+                status=status,
+                error_message=error_msg
+            )
     
     async def check_domains_batch(self, 
                                  urls: List[str],
