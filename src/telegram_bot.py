@@ -567,7 +567,7 @@ class TelegramBot:
     async def cmd_check_now(self, args: str, msg_id: int, user_id: int, username: str):
         """立即检查命令"""
         if self.check_callback:
-            await self.send_message("🔍 开始执行域名检查...", reply_to=msg_id)
+            # 直接触发检查，详细信息由 main.py 发送
             asyncio.create_task(self.check_callback(is_manual=True))
         else:
             await self.send_message("❌ 检查功能未就绪", reply_to=msg_id)

@@ -219,6 +219,9 @@ class TelegramNotifier:
         success_count = sum(1 for r in results if r.is_success)
         failed_count = total_count - success_count
         
+        # 添加调试日志
+        self.logger.info(f"检查汇总 - is_manual: {is_manual}, total: {total_count}, success: {success_count}, failed: {failed_count}")
+        
         # 决定是否发送通知的逻辑：
         # 1. 手动检查：总是发送通知
         # 2. 定时检查且有失败：总是发送通知
@@ -230,6 +233,10 @@ class TelegramNotifier:
             elif not notify_all_success:
                 self.logger.info(f"定时检查完成：{total_count} 个域名全部正常，未启用全部成功通知")
                 return
+        
+        # 手动检查时，总是发送通知
+        if is_manual:
+            self.logger.info(f"手动检查触发，将发送检查结果通知")
         
         # 构建汇总消息
         if failed_count == 0:

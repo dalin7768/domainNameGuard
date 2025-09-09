@@ -263,13 +263,27 @@ class DomainMonitor:
             if is_manual and show_eta:
                 eta_minutes = estimated_seconds // 60
                 eta_seconds = estimated_seconds % 60
+                
+                # 获取通知配置信息
+                notification_config = self.config_manager.get('notification', {})
+                quiet_on_success = notification_config.get('quiet_on_success', False)
+                notify_on_all_success = notification_config.get('notify_on_all_success', False)
+                notify_on_recovery = notification_config.get('notify_on_recovery', True)
+                failure_threshold = notification_config.get('failure_threshold', 2)
+                
                 await self.bot.send_message(
-                    f"🔍 **开始检查域名**\n\n"
-                    f"📊 域名总数: {domain_count} 个\n"
-                    f"⚡ 并发数: {max_concurrent}\n"
-                    f"📦 批次数: {batches}\n"
-                    f"⏱️ 预计耗时: {eta_minutes}分{eta_seconds}秒\n\n"
-                    f"正在检查..."
+                    f"🔍 **开始执行域名检查**\n\n"
+                    f"📊 **检查信息**\n"
+                    f"├ 域名总数: {domain_count} 个\n"
+                    f"├ 并发数: {max_concurrent}\n"
+                    f"├ 批次数: {batches}\n"
+                    f"└ 预计耗时: {eta_minutes}分{eta_seconds}秒\n\n"
+                    f"⚙️ **通知设置**\n"
+                    f"├ 静默模式: {'✅ 开启' if quiet_on_success else '❌ 关闭'}\n"
+                    f"├ 全部成功通知: {'✅ 开启' if notify_on_all_success else '❌ 关闭'}\n"
+                    f"├ 恢复通知: {'✅ 开启' if notify_on_recovery else '❌ 关闭'}\n"
+                    f"└ 失败阈值: {failure_threshold} 次\n\n"
+                    f"正在检查中，请稍候..."
                 )
             
             self.logger.info(f"检查 {domain_count} 个域名，并发数 {max_concurrent}，分 {batches} 批")
@@ -874,11 +888,37 @@ class DomainMonitor:
         interval = self.config_manager.get('check.interval_minutes', 30)
         self.current_interval = interval  # 初始化当前间隔时间
         
+        # 获取更多配置信息
+        notification_config = self.config_manager.get('notification', {})
+        check_config = self.config_manager.get('check', {})
+        daily_report_config = self.config_manager.get('daily_report', {})
+        
+        quiet_on_success = notification_config.get('quiet_on_success', False)
+        notify_on_all_success = notification_config.get('notify_on_all_success', False)
+        notify_on_recovery = notification_config.get('notify_on_recovery', True)
+        failure_threshold = notification_config.get('failure_threshold', 2)
+        max_concurrent = check_config.get('max_concurrent', 50)
+        timeout_seconds = check_config.get('timeout_seconds', 10)
+        retry_count = check_config.get('retry_count', 3)
+        daily_report_enabled = daily_report_config.get('enabled', False)
+        daily_report_time = daily_report_config.get('time', '00:00')
+        
         await self.bot.send_message(
             f"🚀 **域名监控服务已启动**\n\n"
-            f"🌐 监控域名数: {len(domains)} 个\n"
-            f"⏰ 最大循环时间: {interval} 分钟\n\n"
-            f"使用 /help 查看所有命令"
+            f"📊 **监控配置**\n"
+            f"├ 监控域名数: {len(domains)} 个\n"
+            f"├ 最大循环时间: {interval} 分钟\n"
+            f"├ 并发数: {max_concurrent}\n"
+            f"├ 超时时间: {timeout_seconds} 秒\n"
+            f"└ 重试次数: {retry_count} 次\n\n"
+            f"🔔 **通知设置**\n"
+            f"├ 静默模式: {'✅ 开启' if quiet_on_success else '❌ 关闭'}\n"
+            f"├ 全部成功通知: {'✅ 开启' if notify_on_all_success else '❌ 关闭'}\n"
+            f"├ 恢复通知: {'✅ 开启' if notify_on_recovery else '❌ 关闭'}\n"
+            f"├ 失败阈值: {failure_threshold} 次\n"
+            f"└ 每日报告: {'✅ ' + daily_report_time if daily_report_enabled else '❌ 关闭'}\n\n"
+            f"💡 使用 /help 查看所有命令\n"
+            f"🔍 使用 /check 立即执行检查"
         )
         
         # 启动定时检查任务（包含首次检查）
