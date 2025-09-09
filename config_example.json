@@ -1,41 +1,46 @@
 {
   "telegram": {
-    "bot_token": "YOUR_BOT_TOKEN_HERE",  // Telegram Bot Token，从 @BotFather 获取
-    "chat_id": "-1001234567890",         // 群组 ID，负数表示群组，可通过 getUpdates API 获取
-    "admin_users": ["@chong_qing6"]                     // 管理员用户 ID 列表，为空时所有人都可以执行命令
+    "bot_token": "YOUR_BOT_TOKEN_HERE", // Telegram Bot Token，从 @BotFather 获取
+    "chat_id": "-1001234567890", // 群组 ID，负数表示群组，可通过 getUpdates API 获取
+    "admin_users": ["@chong_qing6"] // 管理员用户 ID 列表，为空时所有人都可以执行命令
   },
-  
+
   "check": {
-    "interval_minutes": 20,        // 最大循环时间（分钟），如果检查未完成会继续，完成后等待剩余时间
-    "max_concurrent": 10,          // 最大并发数（线程数），根据服务器性能设置，建议：低配1-10，中配20-50，高配100-200
-    "auto_adjust_concurrent": true,// 是否自动调整并发数（根据系统负载）
-    "timeout_seconds": 10,         // HTTP 请求超时时间（秒），最小 1，最大 300
-    "retry_count": 2,              // 失败后重试次数，最小 0，最大 10
-    "retry_delay_seconds": 5,      // 重试之间的延迟时间（秒）
-    "batch_notify": false,         // 是否分批通知（true: 每批完成后通知，false: 全部完成后通知）
-    "show_eta": true              // 是否显示预计完成时间
+    "interval_minutes": 20, // 最大循环时间（分钟），如果检查未完成会继续，完成后等待剩余时间
+    "max_concurrent": 10, // 最大并发数（线程数），根据服务器性能设置，建议：低配1-10，中配20-50，高配100-200
+    "auto_adjust_concurrent": true, // 是否自动调整并发数（根据系统负载）
+    "timeout_seconds": 10, // HTTP 请求超时时间（秒），最小 1，最大 300
+    "retry_count": 2, // 失败后重试次数，最小 0，最大 10
+    "retry_delay_seconds": 5, // 重试之间的延迟时间（秒）
+    "batch_notify": false, // 是否分批通知（true: 每批完成后通知，false: 全部完成后通知）
+    "show_eta": true // 是否显示预计完成时间
   },
-  
-  "domains": [                     // 要监控的域名列表，必须以 http:// 或 https:// 开头
-  ""
+
+  "domains": [
+    // 要监控的域名列表，必须以 http:// 或 https:// 开头
+    ""
   ],
-  
+
   "notification": {
-    "notify_on_recovery": true,    // 是否在域名恢复正常时发送通知
-    "failure_threshold": 2,        // 连续失败多少次后才发送告警，避免偶发问题
-    "cooldown_minutes": 60,        // 同一域名告警的冷却时间（分钟），避免频繁告警
-    "quiet_on_success": false      // 定时检查成功时是否静默（不发送成功通知），仅在有错误时发送
+    "notify_on_recovery": true, // 是否在域名恢复正常时发送通知
+    "failure_threshold": 2, // 连续失败多少次后才发送告警，避免偶发问题
+    "cooldown_minutes": 60, // 同一域名告警的冷却时间（分钟），避免频繁告警
+    "quiet_on_success": false // 定时检查成功时是否静默（不发送成功通知），仅在有错误时发送
   },
-  
+  "history": {
+    "enabled": true,
+    "retention_days": 30,
+    "max_records": 10000
+  },
   "daily_report": {
-    "enabled": false,              // 是否启用每日统计报告
-    "time": "00:00"               // 发送时间（24小时制，格式：HH:MM）
+    "enabled": false, // 是否启用每日统计报告
+    "time": "00:00" // 发送时间（24小时制，格式：HH:MM）
   },
-  
+
   "logging": {
-    "level": "INFO",               // 日志级别：DEBUG, INFO, WARNING, ERROR
-    "file": "domain_monitor.log",  // 日志文件名
-    "max_size_mb": 10,             // 单个日志文件最大大小（MB）
-    "backup_count": 5              // 保留的历史日志文件数量
+    "level": "INFO", // 日志级别：DEBUG, INFO, WARNING, ERROR
+    "file": "domain_monitor.log", // 日志文件名
+    "max_size_mb": 10, // 单个日志文件最大大小（MB）
+    "backup_count": 5 // 保留的历史日志文件数量
   }
 }

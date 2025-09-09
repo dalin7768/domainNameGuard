@@ -305,6 +305,7 @@ class TelegramNotifier:
                         else:
                             error_groups[f'http_{result.status_code}'].append(result)
                     else:
+                        # 使用枚举对象作为键，保持一致性
                         error_groups[result.status].append(result)
             
             message = f"⚠️ **检查结果**\n\n"
@@ -340,7 +341,7 @@ class TelegramNotifier:
             current_message += f"✅ 正常在线: {success_count} 个\n"
             current_message += f"❌ 异常域名: {failed_count} 个\n\n"
             
-            # 定义显示顺序
+            # 定义显示顺序（混合字符串和枚举）
             display_order = [
                 'cloudflare_error', 'gateway_error', 'server_error', 
                 'access_denied', 'not_found', 'bad_request',
@@ -356,12 +357,19 @@ class TelegramNotifier:
                     continue
                     
                 domains = error_groups[status]
-                emoji, name = error_names.get(status, ("⚠️", f"HTTP {status.replace('http_', '')}"))
+                # 获取错误名称，如果是枚举则使用其值
+                if isinstance(status, CheckStatus):
+                    status_value = status.value
+                else:
+                    status_value = status
+                emoji, name = error_names.get(status, ("⚠️", status_value.upper()))
                 domain_count = len(domains)
                 
                 # 根据错误类型构建详细说明
                 detail_info = ""
-                if status == 'cloudflare_error':
+                # 对于字符串键和枚举键使用不同的判断方式
+                status_str = status if isinstance(status, str) else status.value
+                if status_str == 'cloudflare_error':
                     # 收集所有Cloudflare状态码
                     cf_codes = defaultdict(list)
                     for r in domains:
@@ -384,7 +392,7 @@ class TelegramNotifier:
                         elif code == 526:
                             details.append(f"526SSL证书无效")
                     detail_info += ", ".join(details) + ")"
-                elif status == 'gateway_error':
+                elif status_str == 'gateway_error':
                     gw_codes = defaultdict(list)
                     for r in domains:
                         gw_codes[r.status_code].append(r.domain_name)
@@ -398,7 +406,7 @@ class TelegramNotifier:
                         elif code == 504:
                             details.append("504网关超时")
                     detail_info += ", ".join(details) + ")"
-                elif status == 'access_denied':
+                elif status_str == 'access_denied':
                     ac_codes = defaultdict(list)
                     for r in domains:
                         ac_codes[r.status_code].append(r.domain_name)
