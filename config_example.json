@@ -23,7 +23,13 @@
   "notification": {
     "notify_on_recovery": true,    // 是否在域名恢复正常时发送通知
     "failure_threshold": 2,        // 连续失败多少次后才发送告警，避免偶发问题
-    "cooldown_minutes": 60         // 同一域名告警的冷却时间（分钟），避免频繁告警
+    "cooldown_minutes": 60,        // 同一域名告警的冷却时间（分钟），避免频繁告警
+    "quiet_on_success": false      // 定时检查成功时是否静默（不发送成功通知），仅在有错误时发送
+  },
+  
+  "daily_report": {
+    "enabled": false,              // 是否启用每日统计报告
+    "time": "00:00"               // 发送时间（24小时制，格式：HH:MM）
   },
   
   "logging": {
