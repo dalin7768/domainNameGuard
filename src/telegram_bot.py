@@ -55,13 +55,15 @@ class TelegramBot:
             '/threshold': self.cmd_set_threshold,
             '/cooldown': self.cmd_set_cooldown,
             '/recovery': self.cmd_toggle_recovery,
-            '/allsuccess': self.cmd_toggle_all_success,
+            '/notify': self.cmd_set_notify_level,  # 新的通知级别命令
             '/autoadjust': self.cmd_toggle_autoadjust,
+            '/errors': self.cmd_show_errors,  # 查看错误状态
+            '/history': self.cmd_show_history,  # 查看历史记录
+            '/ack': self.cmd_acknowledge_error,  # 确认处理错误
             '/admin': self.cmd_admin,
             '/stop': self.cmd_stop,
             '/restart': self.cmd_restart,
             '/reload': self.cmd_reload,
-            '/quiet': self.cmd_toggle_quiet,
             '/dailyreport': self.cmd_daily_report
         }
         
@@ -72,13 +74,15 @@ class TelegramBot:
         self.reload_callback: Optional[Callable] = None
         self.get_status_callback: Optional[Callable] = None  # 获取状态信息的回调
         self.send_daily_report_callback: Optional[Callable] = None  # 发送每日报告的回调
+        self.error_tracker_callback: Optional[Callable] = None  # 获取错误跟踪器的回调
     
     def set_callbacks(self, check: Optional[Callable] = None, 
                       stop: Optional[Callable] = None,
                       restart: Optional[Callable] = None,
                       reload: Optional[Callable] = None,
                       get_status: Optional[Callable] = None,
-                      send_daily_report: Optional[Callable] = None):
+                      send_daily_report: Optional[Callable] = None,
+                      error_tracker: Optional[Callable] = None):
         """设置回调函数"""
         if check:
             self.check_callback = check
@@ -92,6 +96,8 @@ class TelegramBot:
             self.get_status_callback = get_status
         if send_daily_report:
             self.send_daily_report_callback = send_daily_report
+        if error_tracker:
+            self.error_tracker_callback = error_tracker
     
     async def send_message(self, text: str, parse_mode: str = "Markdown", 
                           reply_to: Optional[int] = None) -> bool:
@@ -272,6 +278,13 @@ class TelegramBot:
         notification_config = self.config_manager.get('notification', {})
         domains = self.config_manager.get_domains()
         
+        notify_level = notification_config.get('level', 'smart')
+        level_desc = {
+            'all': '始终通知',
+            'error': '仅错误',
+            'smart': '智能通知'
+        }
+        
         help_text = f"""📚 **域名监控机器人帮助**
 
 ⚙️ **当前配置**:
@@ -279,8 +292,7 @@ class TelegramBot:
 • 检查间隔: {check_config.get('interval_minutes', 30)} 分钟
 • 超时时间: {check_config.get('timeout_seconds', 10)} 秒
 • 并发数: {check_config.get('max_concurrent', 10)} 个
-• 重试次数: {check_config.get('retry_count', 2)} 次
-• 静默模式: {'开启' if notification_config.get('quiet_on_success', False) else '关闭'}
+• 通知级别: {level_desc.get(notify_level, notify_level)}
 • 自适应并发: {'开启' if check_config.get('auto_adjust_concurrent', True) else '关闭'}
 
 🌟 **基础命令**:
@@ -294,6 +306,17 @@ class TelegramBot:
 `/remove example.com` - 删除域名（支持批量）
 `/clear` - 清空所有域名
 
+🔔 **通知设置**:
+`/notify` - 查看/设置通知级别
+`/notify all` - 始终通知
+`/notify error` - 仅错误时通知
+`/notify smart` - 智能通知（只通知变化）
+
+🔍 **错误管理**:
+`/errors` - 查看当前错误状态
+`/history [days]` - 查看历史记录
+`/ack domain.com` - 确认处理错误
+
 🔧 **配置调整**:
 `/interval 10` - 设置检查间隔（分钟）
 `/timeout 15` - 设置超时时间（秒）
@@ -301,9 +324,7 @@ class TelegramBot:
 `/concurrent 20` - 设置并发数
 `/threshold 3` - 设置失败阈值
 `/cooldown 30` - 设置通知冷却（分钟）
-`/quiet` - 切换静默模式
 `/recovery` - 切换恢复通知
-`/allsuccess` - 切换全部正常通知
 `/autoadjust` - 切换自适应并发
 
 🔄 **服务控制**:
@@ -820,20 +841,187 @@ class TelegramBot:
         else:
             await self.send_message("❌ 重新加载功能未就绪", reply_to=msg_id)
     
-    async def cmd_toggle_quiet(self, args: str, msg_id: int, user_id: int, username: str):
-        """切换静默模式（定时检查时全部成功不发送通知）"""
-        current = self.config_manager.get('notification.quiet_on_success', False)
-        new_value = not current
-        self.config_manager.set('notification.quiet_on_success', new_value)
+    async def cmd_set_notify_level(self, args: str, msg_id: int, user_id: int, username: str):
+        """设置通知级别"""
+        if not args:
+            current = self.config_manager.get('notification.level', 'smart')
+            await self.send_message(
+                f"🔔 **通知级别设置**\n\n"
+                f"当前级别: `{current}`\n\n"
+                f"可用级别：\n"
+                f"`/notify all` - 始终通知（不管成功与否）\n"
+                f"`/notify error` - 仅错误时通知\n"
+                f"`/notify smart` - 智能通知（只通知变化）\n\n"
+                f"💡 **智能通知说明**：\n"
+                f"• 新增错误时通知\n"
+                f"• 域名恢复时通知\n"
+                f"• 错误类型变化时通知\n"
+                f"• 重复错误不通知",
+                reply_to=msg_id
+            )
+            return
+        
+        level = args.strip().lower()
+        if level not in ['all', 'error', 'smart']:
+            await self.send_message(
+                f"❌ 无效的通知级别\n\n"
+                f"请使用: `all`, `error` 或 `smart`",
+                reply_to=msg_id
+            )
+            return
+        
+        self.config_manager.set('notification.level', level)
         self.config_manager.save_config()
         
-        status = "开启" if new_value else "关闭"
+        level_desc = {
+            'all': '始终通知',
+            'error': '仅错误时通知',
+            'smart': '智能通知（只通知变化）'
+        }
+        
         await self.send_message(
-            f"🔇 **静默模式已{status}**\n\n"
-            f"{'定时检查时，如果全部域名正常将不发送通知' if new_value else '定时检查完成后将始终发送通知'}\n"
-            f"（手动检查不受此设置影响）",
+            f"✅ **通知级别已更改**\n\n"
+            f"当前设置: {level_desc[level]}",
             reply_to=msg_id
         )
+    
+    async def cmd_show_errors(self, args: str, msg_id: int, user_id: int, username: str):
+        """显示当前错误状态"""
+        if hasattr(self, 'error_tracker_callback') and self.error_tracker_callback:
+            tracker = await self.error_tracker_callback()
+            if tracker:
+                unack_errors = tracker.get_unacknowledged_errors()
+                ack_errors = tracker.get_acknowledged_errors()
+                
+                message = "🔴 **当前错误状态**\n\n"
+                
+                if unack_errors:
+                    message += f"⚠️ **未处理错误 ({len(unack_errors)}个)**:\n"
+                    for error in unack_errors[:10]:  # 最多显示10个
+                        message += f"• {error.domain_name} - {error.status.value}\n"
+                    if len(unack_errors) > 10:
+                        message += f"• ... 还有 {len(unack_errors) - 10} 个\n"
+                    message += "\n"
+                
+                if ack_errors:
+                    message += f"✅ **已确认处理 ({len(ack_errors)}个)**:\n"
+                    for error in ack_errors[:5]:
+                        message += f"• {error.domain_name}\n"
+                    if len(ack_errors) > 5:
+                        message += f"• ... 还有 {len(ack_errors) - 5} 个\n"
+                    message += "\n"
+                
+                if not unack_errors and not ack_errors:
+                    message += "✨ 没有错误域名\n\n"
+                
+                message += "💡 **使用说明**:\n"
+                message += "`/ack domain.com` - 确认处理某个错误\n"
+                message += "`/history` - 查看历史记录"
+                
+                await self.send_message(message, reply_to=msg_id)
+            else:
+                await self.send_message("❌ 错误跟踪器未就绪", reply_to=msg_id)
+        else:
+            await self.send_message("❌ 错误跟踪功能未启用", reply_to=msg_id)
+    
+    async def cmd_show_history(self, args: str, msg_id: int, user_id: int, username: str):
+        """显示历史记录"""
+        if hasattr(self, 'error_tracker_callback') and self.error_tracker_callback:
+            tracker = await self.error_tracker_callback()
+            if tracker:
+                # 解析参数
+                domain = None
+                days = 7
+                
+                if args:
+                    parts = args.split()
+                    for part in parts:
+                        if part.isdigit():
+                            days = int(part)
+                        else:
+                            domain = part
+                
+                # 获取历史记录
+                history = tracker.get_history(domain=domain, days=days)
+                
+                # 获取统计信息
+                stats = tracker.get_statistics(days=days)
+                
+                message = f"📈 **历史记录 (过去{days}天)**\n\n"
+                
+                # 统计摘要
+                message += f"📊 **统计摘要**:\n"
+                message += f"• 总错误次数: {stats['total_errors']}\n"
+                message += f"• 恢复次数: {stats['total_recoveries']}\n"
+                message += f"• 当前错误: {stats['current_errors']}\n"
+                message += f"• 未处理: {stats['unacknowledged_errors']}\n\n"
+                
+                # 错误类型分布
+                if stats['error_types']:
+                    message += f"🔍 **错误类型**:\n"
+                    for error_type, count in stats['error_types'].items():
+                        message += f"• {error_type}: {count}次\n"
+                    message += "\n"
+                
+                # 最常出错的域名
+                if stats['top_error_domains']:
+                    message += f"🔝 **TOP错误域名**:\n"
+                    for domain_name, count in stats['top_error_domains'][:5]:
+                        message += f"• {domain_name}: {count}次\n"
+                    message += "\n"
+                
+                # 最近记录
+                if history:
+                    message += f"🕒 **最近记录**:\n"
+                    for record in history[-10:]:  # 最近10条
+                        time_str = record.timestamp.split('T')[1][:8]
+                        status_emoji = '✅' if record.status == 'recovered' else '❌'
+                        message += f"{status_emoji} {time_str} - {record.domain_name}\n"
+                
+                await self.send_message(message, reply_to=msg_id)
+            else:
+                await self.send_message("❌ 错误跟踪器未就绪", reply_to=msg_id)
+        else:
+            await self.send_message("❌ 历史记录功能未启用", reply_to=msg_id)
+    
+    async def cmd_acknowledge_error(self, args: str, msg_id: int, user_id: int, username: str):
+        """确认处理错误"""
+        if not args:
+            await self.send_message(
+                f"❌ 请指定域名\n\n"
+                f"示例: `/ack example.com`\n"
+                f"或: `/ack example.com 已联系运维处理`",
+                reply_to=msg_id
+            )
+            return
+        
+        parts = args.split(maxsplit=1)
+        domain = parts[0]
+        notes = parts[1] if len(parts) > 1 else None
+        
+        if hasattr(self, 'error_tracker_callback') and self.error_tracker_callback:
+            tracker = await self.error_tracker_callback()
+            if tracker:
+                # 检查域名是否在错误列表中
+                current_errors = tracker.current_errors
+                if domain in current_errors:
+                    tracker.acknowledge_error(domain, notes)
+                    await self.send_message(
+                        f"✅ **已确认处理**\n\n"
+                        f"域名: {domain}\n"
+                        f"备注: {notes or '无'}\n\n"
+                        f"该域名将不再重复通知，直到恢复正常",
+                        reply_to=msg_id
+                    )
+                else:
+                    await self.send_message(
+                        f"⚠️ 域名 {domain} 当前没有错误",
+                        reply_to=msg_id
+                    )
+            else:
+                await self.send_message("❌ 错误跟踪器未就绪", reply_to=msg_id)
+        else:
+            await self.send_message("❌ 确认功能未启用", reply_to=msg_id)
     
     async def cmd_daily_report(self, args: str, msg_id: int, user_id: int, username: str):
         """管理每日统计报告"""

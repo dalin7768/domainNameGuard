@@ -188,7 +188,10 @@ class TelegramNotifier:
                              notify_all_success: bool = False,
                              quiet_on_success: bool = False,
                              is_manual: bool = False,
-                             next_run_time: Optional[datetime] = None) -> None:
+                             next_run_time: Optional[datetime] = None,
+                             new_errors: Optional[List[CheckResult]] = None,
+                             recovered: Optional[List[CheckResult]] = None,
+                             persistent_errors: Optional[List[CheckResult]] = None) -> None:
         """
         通知检查结果（简化版，只发送汇总）
         
@@ -199,6 +202,9 @@ class TelegramNotifier:
             notify_all_success: 是否在全部正常时通知
             quiet_on_success: 定时检查时，如果全部成功是否静默（不发送通知）
             is_manual: 是否为手动触发的检查
+            new_errors: 新增的错误（智能模式）
+            recovered: 已恢复的域名（智能模式）
+            persistent_errors: 持续错误（智能模式）
         """
         # 更新失败计数（用于内部跟踪）
         for result in results:
@@ -207,8 +213,18 @@ class TelegramNotifier:
             else:
                 self.failure_count[result.url] = self.failure_count.get(result.url, 0) + 1
         
-        # 发送统一的检查完成通知（包含所有信息）
-        await self._send_check_summary(results, notify_all_success, quiet_on_success, is_manual, next_run_time=next_run_time)
+        # 如果是智能模式并提供了详细信息
+        if new_errors is not None or recovered is not None:
+            await self._send_smart_notification(
+                new_errors=new_errors or [],
+                recovered=recovered or [],
+                persistent_errors=persistent_errors or [],
+                total_results=results,
+                next_run_time=next_run_time
+            )
+        else:
+            # 发送传统的检查完成通知
+            await self._send_check_summary(results, notify_all_success, quiet_on_success, is_manual, next_run_time=next_run_time)
     
     async def _send_check_summary(self, results: List[CheckResult], notify_all_success: bool, 
                                   quiet_on_success: bool = False, is_manual: bool = False, 
@@ -448,6 +464,84 @@ class TelegramNotifier:
                 self.logger.info(f"所有检查汇总通知已发送 - 共 {total_count} 个域名，{success_count} 个正常，{failed_count} 个异常")
             else:
                 self.logger.error("部分检查汇总通知发送失败")
+    
+    async def _send_smart_notification(self, 
+                                       new_errors: List[CheckResult],
+                                       recovered: List[CheckResult],
+                                       persistent_errors: List[CheckResult],
+                                       total_results: List[CheckResult],
+                                       next_run_time: Optional[datetime] = None) -> None:
+        """
+        发送智能通知（只通知变化）
+        
+        Args:
+            new_errors: 新增的错误
+            recovered: 已恢复的域名
+            persistent_errors: 持续错误
+            total_results: 所有检查结果
+            next_run_time: 下次检查时间
+        """
+        # 如果没有任何变化，不发送通知
+        if not new_errors and not recovered:
+            self.logger.info("智能模式：没有新的变化，不发送通知")
+            return
+        
+        # 构建消息
+        message = "🔔 **智能通知**\n\n"
+        
+        # 新增错误
+        if new_errors:
+            message += f"⚠️ **新增错误 ({len(new_errors)}个)**:\n"
+            for error in new_errors[:10]:  # 最多显示10个
+                message += f"• {error.domain_name} - {error.status.value}\n"
+                if error.error_message:
+                    message += f"  原因: {error.error_message[:50]}\n"
+            if len(new_errors) > 10:
+                message += f"• ... 还有 {len(new_errors) - 10} 个\n"
+            message += "\n"
+        
+        # 已恢复
+        if recovered:
+            message += f"✅ **已恢复 ({len(recovered)}个)**:\n"
+            for rec in recovered[:10]:
+                message += f"• {rec.domain_name}\n"
+            if len(recovered) > 10:
+                message += f"• ... 还有 {len(recovered) - 10} 个\n"
+            message += "\n"
+        
+        # 持续错误提醒
+        unack_count = len([e for e in persistent_errors if e.domain_name not in [r.domain_name for r in recovered]])
+        if unack_count > 0:
+            message += f"🔴 **持续错误**: {unack_count} 个域名仍有问题\n"
+            message += "使用 `/errors` 查看详情\n\n"
+        
+        # 总体统计
+        total_count = len(total_results)
+        failed_count = len([r for r in total_results if not r.is_success])
+        success_count = total_count - failed_count
+        
+        message += f"📊 **当前状态**:\n"
+        message += f"• 总数: {total_count}\n"
+        message += f"• 正常: {success_count}\n"
+        message += f"• 异常: {failed_count}\n\n"
+        
+        # 时间信息
+        message += f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+        
+        # 下次检查时间
+        if next_run_time:
+            time_diff = (next_run_time - datetime.now()).total_seconds()
+            if time_diff > 0:
+                minutes = int(time_diff // 60)
+                seconds = int(time_diff % 60)
+                message += f"⏰ 下次检查: {minutes}分{seconds}秒后"
+        
+        # 发送消息
+        success = await self.send_message(message)
+        if success:
+            self.logger.info("智能通知已发送")
+        else:
+            self.logger.error("智能通知发送失败")
     
     async def _send_grouped_error_messages(self, error_groups: Dict[CheckStatus, List[CheckResult]]) -> None:
         """

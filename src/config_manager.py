@@ -66,9 +66,15 @@ class ConfigManager:
             },
             "domains": [],
             "notification": {
+                "level": "smart",  # all: 始终通知, error: 仅错误, smart: 智能通知(只通知变化)
                 "notify_on_recovery": True,
                 "failure_threshold": 2,
                 "cooldown_minutes": 60
+            },
+            "history": {
+                "enabled": True,
+                "retention_days": 30,  # 历史记录保留天数
+                "max_records": 10000  # 最大记录数
             },
             "logging": {
                 "level": "INFO",

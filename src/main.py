@@ -21,6 +21,7 @@ from config_manager import ConfigManager
 from domain_checker import DomainChecker, CheckResult, CheckStatus
 from telegram_notifier import TelegramNotifier
 from telegram_bot import TelegramBot
+from error_tracker import ErrorTracker
 
 
 class DomainMonitor:
@@ -46,6 +47,7 @@ class DomainMonitor:
         self.notifier: Optional[TelegramNotifier] = None  # Telegram 通知器
         self.bot: Optional[TelegramBot] = None            # Telegram 命令处理器
         self.logger: Optional[logging.Logger] = None      # 日志记录器
+        self.error_tracker: Optional[ErrorTracker] = None # 错误状态跟踪器
         self.is_running = True                             # 运行状态标志
         
         # 异步任务管理
@@ -178,7 +180,16 @@ class DomainMonitor:
             )
             self.logger.info("Telegram 通知器初始化完成")
             
-            # 步骤3：初始化 Telegram Bot 并设置回调
+            # 步骤3：初始化错误跟踪器
+            history_config = self.config_manager.get('history', {})
+            if history_config.get('enabled', True):
+                self.error_tracker = ErrorTracker(
+                    history_file="error_history.json",
+                    retention_days=history_config.get('retention_days', 30)
+                )
+                self.logger.info("错误跟踪器初始化完成")
+            
+            # 步骤4：初始化 Telegram Bot 并设置回调
             self.bot = TelegramBot(self.config_manager)
             # 设置命令回调函数，当用户发送命令时会调用这些函数
             self.bot.set_callbacks(
@@ -187,7 +198,8 @@ class DomainMonitor:
                 restart=self.restart_service,  # /restart 命令，重启服务
                 reload=self.reload_config,  # /reload 命令，重新加载配置
                 get_status=self.get_status_info,  # /status 命令，获取详细状态
-                send_daily_report=self.send_daily_report  # /dailyreport now 命令，发送每日报告
+                send_daily_report=self.send_daily_report,  # /dailyreport now 命令，发送每日报告
+                error_tracker=self.get_error_tracker  # 获取错误跟踪器
             )
             self.logger.info("Telegram Bot 初始化完成")
             
@@ -377,16 +389,60 @@ class DomainMonitor:
             
             self.next_check_time = next_run_time
             
+            # 更新错误跟踪器
+            new_errors = []
+            recovered = []
+            persistent_errors = []
+            
+            if self.error_tracker:
+                new_errors, recovered, persistent_errors = await self.error_tracker.update_status(results)
+            
+            # 根据通知级别决定是否发送通知
+            notify_level = notification_config.get('level', 'smart')
+            
+            # 如果是手动检查，始终通知
+            if is_manual:
+                should_notify = True
+                results_to_notify = results
+            # 根据通知级别决定
+            elif notify_level == 'all':
+                # 始终通知
+                should_notify = True
+                results_to_notify = results
+            elif notify_level == 'error':
+                # 仅在有错误时通知
+                failed_results = [r for r in results if not r.is_success]
+                should_notify = len(failed_results) > 0
+                results_to_notify = results
+            elif notify_level == 'smart':
+                # 智能通知：只通知变化
+                should_notify = len(new_errors) > 0 or len(recovered) > 0
+                # 只通知新增错误和恢复的
+                results_to_notify = new_errors + recovered
+                # 如果有持续错误但未确认，也要提醒
+                if self.error_tracker:
+                    unack_count = len(self.error_tracker.get_unacknowledged_errors())
+                    if unack_count > 0:
+                        # 添加未处理错误提醒
+                        results_to_notify = results
+            else:
+                # 默认为智能通知
+                should_notify = len(new_errors) > 0 or len(recovered) > 0
+                results_to_notify = new_errors + recovered
+            
             # 如果不是批次通知模式，或需要最终汇总，发送总体通知
-            if not batch_notify:
+            if not batch_notify and should_notify:
                 await self.notifier.notify_failures(
-                    results,
+                    results_to_notify if notify_level == 'smart' and not is_manual else results,
                     failure_threshold=notification_config.get('failure_threshold', 2),
                     notify_recovery=notification_config.get('notify_on_recovery', True),
-                    notify_all_success=notification_config.get('notify_on_all_success', True),
-                    quiet_on_success=notification_config.get('quiet_on_success', False),
+                    notify_all_success=False,  # 由notify_level控制
+                    quiet_on_success=False,  # 由notify_level控制
                     is_manual=is_manual,
-                    next_run_time=next_run_time
+                    next_run_time=next_run_time,
+                    new_errors=new_errors if notify_level == 'smart' else None,
+                    recovered=recovered if notify_level == 'smart' else None,
+                    persistent_errors=persistent_errors if notify_level == 'smart' else None
                 )
             else:
                 # 批次模式下只发送最终汇总
@@ -593,6 +649,14 @@ class DomainMonitor:
             'total_checks_count': self.total_checks_count,
             'is_running': self.is_running
         }
+    
+    async def get_error_tracker(self):
+        """获取错误跟踪器
+        
+        Returns:
+            ErrorTracker: 错误跟踪器实例
+        """
+        return self.error_tracker
     
     def _update_daily_stats(self, results: List[CheckResult]) -> None:
         """更新每日统计数据
