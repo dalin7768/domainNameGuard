@@ -22,6 +22,7 @@
   ],
 
   "notification": {
+    "level": "smart", // 通知级别：smart（智能模式，只通知变化）、full（完整模式，每次都通知详细结果）
     "notify_on_recovery": true, // 是否在域名恢复正常时发送通知
     "failure_threshold": 2, // 连续失败多少次后才发送告警，避免偶发问题
     "cooldown_minutes": 60, // 同一域名告警的冷却时间（分钟），避免频繁告警
