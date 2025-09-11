@@ -472,7 +472,7 @@ class TelegramNotifier:
         # 新增错误
         if new_errors:
             message += f"🆕 **新出现问题 ({len(new_errors)}个)**:\n"
-            for error in new_errors[:10]:  # 最多显示10个
+            for error in new_errors:  # 显示所有新错误
                 # 为HTTP错误提供具体的状态码描述
                 if error.status == CheckStatus.HTTP_ERROR and error.status_code:
                     if error.status_code == 520:
@@ -524,17 +524,14 @@ class TelegramNotifier:
                         'SECURITY_WARNING': '安全警告'
                     }.get(error.status.value, error.status.value)
                 message += f"• {error.domain_name} - {status_desc}\n"
-            if len(new_errors) > 10:
-                message += f"• ... 及其他 {len(new_errors) - 10} 个\n"
+            # 显示所有新错误，不省略
             message += "\n"
         
         # 已恢复
         if recovered:
             message += f"✅ **已恢复正常 ({len(recovered)}个)**:\n"
-            for rec in recovered[:10]:
+            for rec in recovered:  # 显示所有恢复的域名
                 message += f"• {rec.domain_name}\n"
-            if len(recovered) > 10:
-                message += f"• ... 及其他 {len(recovered) - 10} 个\n"
             message += "\n"
         
         # 持续错误提醒
@@ -626,9 +623,7 @@ class TelegramNotifier:
                 
                 message += "\n"
             
-            # 如果超过20个，显示省略信息
-            if len(results) > 20:
-                message += f"\n  ... 还有 {len(results) - 20} 个域名\n"
+            # 显示所有域名，不省略
             
             # 添加建议
             if status in suggestions:
@@ -669,9 +664,7 @@ class TelegramNotifier:
             
             message += "\n"
         
-        # 如果超过20个，显示省略信息
-        if len(recovery_domains) > 20:
-            message += f"\n  ... 还有 {len(recovery_domains) - 20} 个域名\n"
+        # 显示所有恢复的域名，不省略
         
         message += f"\n🎉 所有域名已恢复正常运行"
         

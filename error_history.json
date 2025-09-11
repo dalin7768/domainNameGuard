@@ -1,0 +1,591 @@
+{
+  "history": [
+    {
+      "domain_name": "ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "admin.boa-i.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "boa-i.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "www.boa-i.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "_6997a39b831df5c124f650369a5a2332.boa-i.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "boa-v.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "www.boa-v.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "_6997a39b831df5c124f650369a5a2332.boa-v.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "boa-x.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "www.boa-x.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "_6997a39b831df5c124f650369a5a2332.boa-x.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "wss.btcboadmin.top",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T16:58:47.068637",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：404"
+    },
+    {
+      "domain_name": "ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "admin.boa-i.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "boa-i.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "www.boa-i.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "_6997a39b831df5c124f650369a5a2332.boa-i.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "boa-v.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "www.boa-v.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "_6997a39b831df5c124f650369a5a2332.boa-v.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "boa-x.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "www.boa-x.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "_6997a39b831df5c124f650369a5a2332.boa-x.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "wss.btcboadmin.top",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:32:51.476178",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：404"
+    },
+    {
+      "domain_name": "ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "admin.boa-i.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "boa-i.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "www.boa-i.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "_6997a39b831df5c124f650369a5a2332.boa-i.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "boa-v.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "www.boa-v.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "_6997a39b831df5c124f650369a5a2332.boa-v.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "boa-x.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "www.boa-x.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：522"
+    },
+    {
+      "domain_name": "_6997a39b831df5c124f650369a5a2332.boa-x.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "wss.btcboadmin.top",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:42:19.615118",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：404"
+    },
+    {
+      "domain_name": "ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:43:45.091395",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:43:45.091395",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:43:45.091395",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:43:45.091395",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:47:15.582074",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:47:15.582074",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:47:15.582074",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:47:15.582074",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:50:14.101289",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:50:14.101289",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:50:14.101289",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:50:14.101289",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:54:47.805184",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:54:47.805184",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:54:47.806185",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T17:54:47.806185",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T18:02:32.242608",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T18:02:32.242608",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T18:02:32.242608",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T18:02:32.242608",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    }
+  ],
+  "acknowledged_errors": [],
+  "last_updated": "2025-09-11T18:02:32.243608"
+}

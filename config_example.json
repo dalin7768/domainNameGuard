@@ -58,10 +58,19 @@
   },
 
   "http_api": {
-    "enabled": false,
-    "host": "127.0.0.1",
+    "enabled": true,
+    "host": "0.0.0.0",
     "port": 8080,
-    "cors_enabled": true
+    "cors_enabled": true,
+    "allowed_ips": [],
+    "rate_limit": {
+      "enabled": true,
+      "requests_per_minute": 30
+    },
+    "auth": {
+      "enabled": true,
+      "api_key": "paLoUHK5jGB7Cjc93Rlq-mc1dH4lmTkhTHr0i2ffvaE"
+    }
   },
 
   "logging": {

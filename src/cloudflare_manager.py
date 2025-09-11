@@ -29,8 +29,8 @@ class CloudflareTokenManager:
             tokens_file: Token存储文件路径
         """
         self.tokens_file = tokens_file
-        self.tokens_data = self._load_tokens()
         self.logger = logging.getLogger(__name__)
+        self.tokens_data = self._load_tokens()
     
     def _load_tokens(self) -> Dict[str, Dict]:
         """加载Token数据"""
@@ -40,11 +40,25 @@ class CloudflareTokenManager:
                     return json.load(f)
             except Exception as e:
                 self.logger.error(f"加载Token文件失败: {e}")
-        
-        return {
-            "users": {},  # 格式: {telegram_user_id: {"tokens": [{"name": "...", "token": "...", "permissions": [...]}]}}
-            "global_tokens": []  # 全局可用的token
-        }
+        else:
+            # 如果文件不存在，创建默认文件
+            self.logger.info(f"Token文件不存在，创建默认文件: {self.tokens_file}")
+            default_data = {
+                "users": {},  # 格式: {telegram_user_id: {"tokens": [{"name": "...", "token": "...", "permissions": [...]}]}}
+                "global_tokens": []  # 全局可用的token
+            }
+            try:
+                # 确保父目录存在
+                dir_path = os.path.dirname(self.tokens_file)
+                if dir_path:  # 只有当目录路径不为空时才创建
+                    os.makedirs(dir_path, exist_ok=True)
+                with open(self.tokens_file, 'w', encoding='utf-8') as f:
+                    json.dump(default_data, f, indent=2, ensure_ascii=False)
+                self.logger.info(f"已创建默认Token文件: {self.tokens_file}")
+                return default_data
+            except Exception as e:
+                self.logger.error(f"创建Token文件失败: {e}")
+                return default_data
     
     def _save_tokens(self) -> bool:
         """保存Token数据"""
@@ -670,14 +684,89 @@ class CloudflareManager:
             self.logger.error(f"同步删除域名失败: {e}")
             return 0
     
-    async def export_and_merge_domains(self, user_id: str, token_name: str = None, merge_mode: str = None) -> Dict:
+    async def export_all_domains_realtime(self, output_format: str = "txt", record_types: Optional[List[str]] = None, callback = None) -> Dict:
         """
-        导出CF域名并直接合并到domains配置
+        实时导出所有域名（每获取一个就通过回调处理）
+        
+        Args:
+            output_format: 输出格式 (txt, json, csv)
+            record_types: 记录类型筛选
+            callback: 回调函数，每获取到一个域名就调用 callback(domain)
+            
+        Returns:
+            导出结果
+        """
+        try:
+            # 获取所有zones
+            zones = await self.get_zones()
+            if not zones:
+                return {"success": False, "error": "未找到任何域名", "domains": []}
+            
+            all_domains = set()
+            zone_info = []
+            processed_count = 0
+            
+            # 处理每个zone
+            for zone in zones:
+                zone_id = zone.get("id")
+                zone_name = zone.get("name")
+                
+                if not zone_id or not zone_name:
+                    continue
+                
+                # 获取DNS记录
+                dns_records = await self.get_dns_records(zone_id)
+                
+                zone_domains = set()
+                for record in dns_records:
+                    record_name = record.get("name", "")
+                    record_type = record.get("type", "")
+                    
+                    if record_name and (not record_types or record_type in record_types):
+                        # 排除通配符记录
+                        if "*" not in record_name and record_name not in all_domains:
+                            all_domains.add(record_name)
+                            zone_domains.add(record_name)
+                            processed_count += 1
+                            
+                            # 实时回调处理每个域名
+                            if callback:
+                                try:
+                                    await callback(record_name, processed_count)
+                                except Exception as callback_e:
+                                    self.logger.error(f"回调处理域名失败: {callback_e}")
+                
+                zone_info.append({
+                    "zone_name": zone_name,
+                    "zone_id": zone_id,
+                    "domain_count": len(zone_domains),
+                    "domains": sorted(list(zone_domains))
+                })
+            
+            # 转换为列表并排序
+            domain_list = sorted(list(all_domains))
+            
+            return {
+                "success": True,
+                "total_zones": len(zones),
+                "total_domains": len(domain_list),
+                "domains": domain_list,
+                "zone_info": zone_info,
+                "export_time": datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            return {"success": False, "error": str(e), "domains": []}
+
+    async def export_and_merge_domains_realtime(self, user_id: str, token_name: str = None, merge_mode: str = None, progress_callback = None) -> Dict:
+        """
+        实时导出CF域名并直接合并到domains配置（每获取一个域名就立即写入）
         
         Args:
             user_id: 用户ID
             token_name: Token名称，None时导出所有Token
             merge_mode: 合并模式，None时使用配置默认值
+            progress_callback: 进度回调函数
             
         Returns:
             操作结果
@@ -689,82 +778,143 @@ class CloudflareManager:
             # 获取合并配置
             merge_config = self._get_merge_config()
             merge_mode = merge_mode or merge_config["default_mode"]
-            # 导出域名
-            if token_name:
-                result = await self.export_user_domains(user_id, token_name)
-            else:
-                result = await self.export_all_user_tokens_domains(user_id)
             
-            if not result["success"]:
-                return result
-            
-            cf_domains = result["domains"]
-            if not cf_domains:
-                return {"success": False, "error": "未获取到任何域名"}
-            
-            # 确保域名格式正确（添加协议）
-            formatted_domains = []
-            if merge_config["auto_format_domains"]:
-                for domain in cf_domains:
-                    if not domain.startswith(('http://', 'https://')):
-                        formatted_domains.append(f"https://{domain}")
-                    else:
-                        formatted_domains.append(domain)
-            else:
-                formatted_domains = cf_domains
-            
-            # 获取当前domains配置
+            # 初始化状态
+            processed_count = 0
+            added_count = 0
             current_domains = set(self.config_manager.get_domains())
-            cf_domains_set = set(formatted_domains)
+            initial_count = len(current_domains)
             
-            # 根据合并模式处理
+            # 如果是替换模式，先清空现有域名
             if merge_mode == "replace":
-                # 替换模式：完全替换为CF域名
-                final_domains = list(cf_domains_set)
-                operation_desc = "替换"
+                success, _ = self.config_manager.clear_domains()
+                if not success:
+                    return {"success": False, "error": "清空现有域名失败"}
+                current_domains = set()
+            
+            # 定义实时处理域名的回调函数
+            async def domain_callback(domain: str, count: int):
+                nonlocal processed_count, added_count, current_domains
                 
-            elif merge_mode == "merge":
-                # 合并模式：合并现有域名和CF域名
-                final_domains = list(current_domains | cf_domains_set)
-                operation_desc = "合并"
+                # 格式化域名
+                if merge_config["auto_format_domains"]:
+                    if not domain.startswith(('http://', 'https://')):
+                        formatted_domain = f"https://{domain}"
+                    else:
+                        formatted_domain = domain
+                else:
+                    formatted_domain = domain
                 
-            elif merge_mode == "add":
-                # 添加模式：只添加新的CF域名
-                new_domains = cf_domains_set - current_domains
-                final_domains = list(current_domains | new_domains)
-                operation_desc = "添加新域名"
+                # 检查是否需要添加（避免重复）
+                should_add = False
+                if merge_mode == "replace":
+                    should_add = True  # 替换模式，添加所有域名
+                elif merge_mode == "add":
+                    should_add = formatted_domain not in current_domains  # 只添加新域名
+                elif merge_mode == "merge":
+                    should_add = formatted_domain not in current_domains  # 合并模式，添加新域名
                 
+                if should_add:
+                    # 立即添加到配置
+                    success, message = self.config_manager.add_domain(formatted_domain)
+                    if success:
+                        current_domains.add(formatted_domain)
+                        added_count += 1
+                        if progress_callback:
+                            await progress_callback(formatted_domain, added_count, count)
+                    else:
+                        self.logger.error(f"添加域名失败: {formatted_domain}, 错误: {message}")
+                
+                processed_count = count
+            
+            # 获取用户Token
+            if token_name:
+                tokens = self.token_manager.get_user_tokens(user_id)
+                target_tokens = [t for t in tokens if t["name"] == token_name]
+                if not target_tokens:
+                    return {"success": False, "error": f"未找到Token: {token_name}"}
             else:
-                return {"success": False, "error": f"不支持的合并模式: {merge_mode}"}
+                tokens = self.token_manager.get_user_tokens(user_id)
+                target_tokens = tokens
             
-            # 更新domains配置
-            success = self.config_manager.update_domains(final_domains)
-            if not success:
-                return {"success": False, "error": "更新domains配置失败"}
+            if not target_tokens:
+                return {"success": False, "error": "没有可用的Token"}
             
-            # 统计信息
-            before_count = len(current_domains)
-            after_count = len(final_domains)
-            added_count = len(cf_domains_set - current_domains)
-            removed_count = len(current_domains - set(final_domains))
+            # 处理每个Token
+            total_cf_domains = 0
+            for token_info in target_tokens:
+                try:
+                    # 创建CloudflareAPIClient实例
+                    client = CloudflareAPIClient(token_info["token"])
+                    
+                    # 获取该token的zones
+                    zones = await client.get_zones()
+                    if not zones:
+                        self.logger.warning(f"Token {token_info['name']} 未获取到任何zone")
+                        continue
+                    
+                    # 处理每个zone
+                    for zone in zones:
+                        zone_id = zone.get("id")
+                        zone_name = zone.get("name")
+                        
+                        if not zone_id or not zone_name:
+                            continue
+                        
+                        # 获取DNS记录
+                        dns_records = await client.get_dns_records(zone_id)
+                        
+                        for record in dns_records:
+                            record_name = record.get("name", "")
+                            record_type = record.get("type", "")
+                            
+                            if record_name and "*" not in record_name:
+                                total_cf_domains += 1
+                                await domain_callback(record_name, total_cf_domains)
+                        
+                except Exception as e:
+                    self.logger.error(f"处理Token {token_info['name']} 失败: {e}")
+                    continue
+            
+            # 计算最终统计
+            final_count = len(self.config_manager.get_domains())
+            
+            operation_desc = {
+                "replace": "替换",
+                "merge": "合并", 
+                "add": "添加"
+            }.get(merge_mode, "操作")
             
             return {
                 "success": True,
                 "operation": operation_desc,
                 "merge_mode": merge_mode,
-                "cf_domains_count": len(cf_domains),
-                "before_count": before_count,
-                "after_count": after_count,
+                "cf_domains_count": total_cf_domains,
+                "before_count": initial_count,
+                "after_count": final_count,
                 "added_count": added_count,
-                "removed_count": removed_count,
-                "cf_domains": cf_domains,
+                "removed_count": max(0, initial_count - final_count + added_count) if merge_mode == "replace" else 0,
                 "token_name": token_name or "所有Token",
-                "export_time": result.get("export_time")
+                "export_time": datetime.now().isoformat()
             }
             
         except Exception as e:
-            self.logger.error(f"导出并合并域名失败: {e}")
+            self.logger.error(f"实时导出并合并域名失败: {e}")
             return {"success": False, "error": str(e)}
+
+    async def export_and_merge_domains(self, user_id: str, token_name: str = None, merge_mode: str = None) -> Dict:
+        """
+        导出CF域名并直接合并到domains配置（向后兼容，内部调用实时版本）
+        
+        Args:
+            user_id: 用户ID
+            token_name: Token名称，None时导出所有Token
+            merge_mode: 合并模式，None时使用配置默认值
+            
+        Returns:
+            操作结果
+        """
+        return await self.export_and_merge_domains_realtime(user_id, token_name, merge_mode)
 
 
 # 使用示例

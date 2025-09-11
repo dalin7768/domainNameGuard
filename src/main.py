@@ -781,14 +781,13 @@ class DomainMonitor:
             problem_domains.sort(key=lambda x: x[1])
             
             message += f"**⚠️ 需要关注的域名** (可用率低于100%)\n"
-            for i, (domain, availability, domain_stats) in enumerate(problem_domains[:10]):  # 只显示前10个
-                is_last = i == min(len(problem_domains) - 1, 9)
+            for i, (domain, availability, domain_stats) in enumerate(problem_domains):  # 显示所有有问题的域名
+                is_last = i == len(problem_domains) - 1
                 prefix = "└" if is_last else "├"
                 message += f"{prefix} {domain}: {availability:.1f}% "
                 message += f"(成功{domain_stats['success']}/{domain_stats['total']})\n"
             
-            if len(problem_domains) > 10:
-                message += f"\n... 还有 {len(problem_domains) - 10} 个域名有异常记录\n"
+            # 显示所有有问题的域名，不省略
         else:
             message += "**✅ 所有域名今日运行良好！**\n"
         

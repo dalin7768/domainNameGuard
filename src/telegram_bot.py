@@ -51,7 +51,7 @@ class TelegramBot:
             '/remove': self.cmd_remove_domain,
             '/clear': self.cmd_clear_domains,
             '/check': self.cmd_check_now,
-            '/config': self.cmd_help,  # 重定向到 /help
+            '/config': self.cmd_show_config,
             '/interval': self.cmd_set_interval,
             '/timeout': self.cmd_set_timeout,
             '/retry': self.cmd_set_retry,
@@ -69,16 +69,16 @@ class TelegramBot:
             '/restart': self.cmd_restart,
             '/reload': self.cmd_reload,
             '/dailyreport': self.cmd_daily_report,
+            '/apikey': self.cmd_update_api_key,
             
             # Cloudflare相关命令
-            '/cf': self.cmd_cloudflare_help,
+            '/cfhelp': self.cmd_cloudflare_help,
             '/cftoken': self.cmd_manage_cf_token,
             '/cflist': self.cmd_list_cf_tokens,
             '/cfzones': self.cmd_get_cf_zones,
             '/cfexport': self.cmd_export_cf_domains,
             '/cfexportall': self.cmd_export_all_cf_domains,
             '/cfverify': self.cmd_verify_cf_token,
-            '/cfdomains': self.cmd_sync_cf_domains,
             '/cfmerge': self.cmd_merge_cf_domains
         }
         
@@ -137,7 +137,17 @@ class TelegramBot:
                 if response.status_code == 200:
                     return True
                 else:
-                    self.logger.error(f"发送消息失败: {response.status_code}")
+                    try:
+                        error_data = response.json()
+                        self.logger.error(f"发送消息失败: {response.status_code}, 详情: {error_data}")
+                    except:
+                        self.logger.error(f"发送消息失败: {response.status_code}, 响应: {response.text[:200]}")
+                    
+                    # 如果是400错误且是Markdown格式问题，尝试用纯文本重发
+                    if response.status_code == 400 and parse_mode == "Markdown":
+                        self.logger.info("尝试使用纯文本格式重新发送")
+                        return await self.send_message(text, parse_mode="", reply_to=reply_to)
+                    
                     return False
                     
         except Exception as e:
@@ -356,12 +366,12 @@ class TelegramBot:
 `/admin add/remove ID` - 管理管理员
 
 ☁️ **Cloudflare集成**:
-`/cf` - 查看Cloudflare帮助
+`/cfhelp` - 查看Cloudflare帮助
 `/cftoken add/remove` - 管理API Token
 `/cflist` - 查看我的Token列表
 `/cfzones 名称` - 获取域名列表
 `/cfexport 名称` - 导出域名到文件
-`/cfdomains 名称` - 同步到监控列表
+`/cfmerge 名称` - 同步到监控配置
 
 💡 **使用说明**:
 • 支持批量操作，用空格或逗号分隔
@@ -622,11 +632,46 @@ class TelegramBot:
         else:
             await self.send_message("❌ 检查功能未就绪", reply_to=msg_id)
     
-    # cmd_show_config 功能已合并到 cmd_help
-    # async def cmd_show_config(self, args: str, msg_id: int, user_id: int, username: str):
-    #     """显示配置命令"""
-    #     summary = self.config_manager.get_config_summary()
-    #     await self.send_message(summary, reply_to=msg_id)
+    async def cmd_show_config(self, args: str, msg_id: int, user_id: int, username: str):
+        """显示当前配置"""
+        try:
+            config_info = []
+            config_info.append("⚙️ **当前配置信息**\n")
+            
+            # 检查间隔
+            interval = self.config_manager.get('check.interval_minutes', 30)
+            config_info.append(f"🔄 检查间隔: {interval} 分钟")
+            
+            # 并发数
+            max_concurrent = self.config_manager.get('check.max_concurrent', 5)
+            config_info.append(f"⚡ 最大并发: {max_concurrent}")
+            
+            # 超时时间
+            timeout = self.config_manager.get('check.timeout_seconds', 10)
+            config_info.append(f"⏱️ 超时时间: {timeout} 秒")
+            
+            # 通知级别
+            notify_level = self.config_manager.get('notification.level', 'smart')
+            config_info.append(f"🔔 通知级别: {notify_level}")
+            
+            # 域名数量
+            domains = self.config_manager.get_domains()
+            config_info.append(f"🌐 监控域名: {len(domains)} 个")
+            
+            # HTTP API状态
+            http_enabled = self.config_manager.get('http_api.enabled', False)
+            http_port = self.config_manager.get('http_api.port', 8080)
+            config_info.append(f"🌍 HTTP API: {'启用' if http_enabled else '禁用'} (端口: {http_port})")
+            
+            # Cloudflare 令牌数量
+            cf_tokens = self.config_manager.config.get('cloudflare_tokens', {})
+            config_info.append(f"☁️ Cloudflare 令牌: {len(cf_tokens)} 个")
+            
+            await self.send_message("\n".join(config_info), reply_to=msg_id)
+            
+        except Exception as e:
+            self.logger.error(f"获取配置信息错误: {e}")
+            await self.send_message(f"❌ 获取配置失败: {str(e)}", reply_to=msg_id)
     
     async def cmd_set_interval(self, args: str, msg_id: int, user_id: int, username: str):
         """设置检查间隔"""
@@ -863,6 +908,37 @@ class TelegramBot:
             await self.reload_callback()
         else:
             await self.send_message("❌ 重新加载功能未就绪", reply_to=msg_id)
+    
+    async def cmd_update_api_key(self, args: str, msg_id: int, user_id: int, username: str):
+        """更新HTTP API密钥"""
+        try:
+            # 生成新的安全API密钥
+            import secrets
+            new_api_key = secrets.token_urlsafe(32)
+            
+            # 更新配置
+            self.config_manager.set('http_api.auth.api_key', new_api_key)
+            self.config_manager.save_config()
+            
+            # 发送确认消息（不显示完整密钥，只显示前8位和后4位）
+            masked_key = f"{new_api_key[:8]}***{new_api_key[-4:]}"
+            
+            await self.send_message(
+                f"🔑 **API密钥已更新**\n\n"
+                f"新密钥: `{masked_key}`\n"
+                f"完整密钥已保存到配置文件\n\n"
+                f"⚠️ **重要提醒**:\n"
+                f"• 请更新所有使用API的客户端\n"
+                f"• 旧密钥将立即失效\n"
+                f"• 如需重启服务请使用 `/restart`",
+                reply_to=msg_id
+            )
+            
+            self.logger.info(f"API密钥已更新，操作者: {username}")
+            
+        except Exception as e:
+            self.logger.error(f"更新API密钥失败: {e}")
+            await self.send_message(f"❌ 更新API密钥失败: {str(e)}", reply_to=msg_id)
     
     async def cmd_set_notify_level(self, args: str, msg_id: int, user_id: int, username: str):
         """设置通知级别"""
@@ -1157,8 +1233,14 @@ class TelegramBot:
 `/cfzones 名称` - 获取Token下的所有域名
 `/cfexport 名称 [格式] [sync]` - 导出单个Token域名到文件
 `/cfexportall [格式] [sync]` - 导出所有Token域名到文件（合并）
-`/cfdomains 名称` - 同步域名到监控列表
 `/cfmerge [名称] [模式]` - 导出并直接合并到监控配置
+
+🔄 **cfmerge 合并模式详解**:
+• `replace` - 完全替换现有监控域名（清空后重新添加CF域名）
+• `merge` - 合并域名（保留现有 + 添加CF域名，去重）
+• `add` - 仅添加新域名（只添加监控中不存在的CF域名）
+
+⚠️ **注意**: cfmerge操作过程中不会频繁发送进度通知，只在完成或出错时通知
 
 📝 **使用说明**:
 • 每个用户可以添加多个API Token
@@ -1173,7 +1255,8 @@ class TelegramBot:
 `/cfzones 主账号`
 `/cfexport 主账号 json sync` - 导出为JSON并同步删除
 `/cfexportall txt` - 合并导出所有Token为TXT格式
-`/cfmerge 主账号 replace` - 用主账号域名替换监控列表
+`/cfmerge 主账号 replace` - 用主账号域名完全替换监控列表
+`/cfmerge 主账号 merge` - 合并主账号域名到现有监控列表
 `/cfmerge merge` - 合并所有Token域名到监控列表"""
         
         await self.send_message(help_text, reply_to=msg_id)
@@ -1355,7 +1438,7 @@ class TelegramBot:
                     response += f"... 还有 {len(domains) - 10} 个域名\n"
             
             response += f"\n💡 **其他操作**:\n"
-            response += f"• `/cfdomains {token_name}` - 同步到监控列表\n"
+            response += f"• `/cfmerge {token_name}` - 同步到监控配置\n"
             response += f"• `/cfexportall` - 导出所有Token域名"
             
             await self.send_message(response, reply_to=msg_id)
@@ -1369,111 +1452,120 @@ class TelegramBot:
     async def cmd_export_all_cf_domains(self, args: str, msg_id: int, user_id: int, username: str):
         """导出用户所有Token的域名（合并）"""
         parts = args.split() if args else []
-        format_type = parts[0] if len(parts) > 0 and parts[0] in ["txt", "json", "csv"] else None
-        sync_delete = "sync" in parts
+        format_type = None
+        sync_delete = False
+        merge_to_config = False
+        merge_mode = "replace"
         
-        await self.send_message("🔄 正在导出所有Token的域名，请稍候...", reply_to=msg_id)
+        # 解析参数
+        for part in parts:
+            if part in ["txt", "json", "csv"]:
+                format_type = part
+            elif part == "sync":
+                sync_delete = True
+            elif part == "merge":
+                merge_to_config = True
+            elif part in ["replace", "add"]:
+                merge_mode = part
+                merge_to_config = True
         
-        result = await self.cf_manager.export_all_user_tokens_domains(
-            str(user_id), format_type, sync_delete
-        )
+        if merge_to_config:
+            # 合并到配置模式
+            await self.send_message(f"🔄 正在导出所有Token域名并{merge_mode}到配置中...", reply_to=msg_id)
+            
+            # 不发送进度通知，只记录错误
+            async def progress_callback(domain: str, added_count: int, total_processed: int):
+                # 仅记录到日志，不发送Telegram消息
+                self.logger.debug(f"cfmerge进度: 已处理{total_processed}个域名，已添加{added_count}个域名")
+            
+            # 执行实时合并操作（所有Token）
+            result = await self.cf_manager.export_and_merge_domains_realtime(
+                str(user_id), None, merge_mode, progress_callback
+            )
+        else:
+            # 原来的导出到文件模式
+            await self.send_message("🔄 正在导出所有Token的域名，请稍候...", reply_to=msg_id)
+            
+            result = await self.cf_manager.export_all_user_tokens_domains(
+                str(user_id), format_type, sync_delete
+            )
         
         if result["success"]:
-            # 构建响应消息
-            response = f"✅ **所有Token域名导出成功**\n\n"
-            response += f"📊 **统计信息**:\n"
-            response += f"• Token总数: {result['total_tokens']}\n"
-            response += f"• 域名总数: {result['total_domains']}\n"
-            response += f"• Zone总数: {result['total_zones']}\n"
-            response += f"• 导出文件: `{result['export_filename']}`\n"
-            response += f"• 文件路径: `{result['export_file']}`\n"
-            
-            if result.get("sync_delete_count", 0) > 0:
-                response += f"• 同步删除: {result['sync_delete_count']} 个域名\n"
-            
-            # 显示每个Token的详情
-            token_results = result.get("token_results", {})
-            if token_results:
-                response += f"\n📝 **Token详情**:\n"
-                for token_name, token_result in token_results.items():
-                    if token_result["success"]:
-                        response += f"• `{token_name}`: {token_result['count']} 个域名 ({token_result['zones']} zones)\n"
-                    else:
-                        response += f"• `{token_name}`: ❌ {token_result['error']}\n"
-            
-            # 显示前10个域名作为预览
-            domains = result["domains"]
-            if domains:
-                response += f"\n📝 **域名预览** (前10个):\n"
-                for i, domain in enumerate(domains[:10], 1):
-                    response += f"{i}. `{domain}`\n"
+            if merge_to_config:
+                # 合并到配置模式的响应
+                try:
+                    operation = str(result.get('operation', '导出'))
+                    token_name = str(result.get('token_name', '所有Token'))
+                    
+                    response = f"✅ **所有Token域名{operation}成功**\n\n"
+                    response += f"📊 **操作统计**:\n"
+                    response += f"• Token: {token_name}\n"
+                    response += f"• 合并模式: {merge_mode}\n"
+                    response += f"• CF域名数: {result.get('cf_domains_count', 0)}\n"
+                    response += f"• 操作前: {result.get('before_count', 0)} 个域名\n"
+                    response += f"• 操作后: {result.get('after_count', 0)} 个域名\n"
+                    
+                    if result.get('added_count', 0) > 0:
+                        response += f"• 新增域名: {result['added_count']} 个\n"
+                    if result.get('removed_count', 0) > 0:
+                        response += f"• 删除域名: {result['removed_count']} 个\n"
+                    
+                    response += f"\n💡 **提示**:\n"
+                    response += f"• 配置已自动更新并保存\n"
+                    response += f"• 使用 `/list` 查看当前监控域名\n"
+                    response += f"• 使用 `/check` 立即开始监控"
+                    
+                    # 确保消息不太长
+                    if len(response) > 4000:
+                        response = response[:4000] + "..."
+                    
+                except Exception as e:
+                    self.logger.error(f"构建合并响应消息失败: {e}")
+                    response = "✅ 所有Token域名导出并合并到配置成功"
+                    
+            else:
+                # 原来的导出到文件模式响应
+                response = f"✅ **所有Token域名导出成功**\n\n"
+                response += f"📊 **统计信息**:\n"
+                response += f"• Token总数: {result.get('total_tokens', 0)}\n"
+                response += f"• 域名总数: {result.get('total_domains', 0)}\n"
+                response += f"• Zone总数: {result.get('total_zones', 0)}\n"
+                
+                if result.get('export_filename'):
+                    response += f"• 导出文件: `{result['export_filename']}`\n"
+                if result.get('export_file'):
+                    response += f"• 文件路径: `{result['export_file']}`\n"
+                
+                if result.get("sync_delete_count", 0) > 0:
+                    response += f"• 同步删除: {result['sync_delete_count']} 个域名\n"
+                
+                # 显示每个Token的详情
+                token_results = result.get("token_results", {})
+                if token_results:
+                    response += f"\n📝 **Token详情**:\n"
+                    for token_name, token_result in token_results.items():
+                        if token_result.get("success"):
+                            response += f"• `{token_name}`: {token_result.get('count', 0)} 个域名 ({token_result.get('zones', 0)} zones)\n"
+                        else:
+                            response += f"• `{token_name}`: ❌ {token_result.get('error', '未知错误')}\n"
+                
+                # 显示前10个域名作为预览
+                domains = result.get("domains", [])
+                if domains:
+                    response += f"\n📝 **域名预览** (前10个):\n"
+                    for i, domain in enumerate(domains[:10], 1):
+                        response += f"{i}. `{domain}`\n"
                 
                 if len(domains) > 10:
                     response += f"... 还有 {len(domains) - 10} 个域名\n"
             
             response += f"\n💡 **其他操作**:\n"
-            response += f"• `/cfdomains 合并文件名` - 同步合并结果到监控列表"
+            response += f"• `/cfmerge merge` - 合并所有Token到监控配置"
             
             await self.send_message(response, reply_to=msg_id)
         else:
             await self.send_message(
                 f"❌ **导出失败**\n\n"
-                f"错误: {result.get('error', '未知错误')}",
-                reply_to=msg_id
-            )
-    
-    async def cmd_sync_cf_domains(self, args: str, msg_id: int, user_id: int, username: str):
-        """同步Cloudflare域名到监控列表"""
-        if not args:
-            await self.send_message(
-                "❌ 请提供Token名称\n\n"
-                "**示例**: `/cfdomains 主账号`\n\n"
-                "⚠️ **注意**: 此操作将覆盖当前监控列表",
-                reply_to=msg_id
-            )
-            return
-        
-        token_name = args.strip()
-        await self.send_message("🔄 正在同步域名到监控列表...", reply_to=msg_id)
-        
-        # 先导出域名
-        result = await self.cf_manager.export_user_domains(str(user_id), token_name)
-        
-        if result["success"]:
-            domains = result["domains"]
-            
-            if not domains:
-                await self.send_message("❌ 没有找到任何域名", reply_to=msg_id)
-                return
-            
-            # 更新domains.json文件
-            try:
-                with open("domains.json", "w", encoding="utf-8") as f:
-                    json.dump(domains, f, indent=2, ensure_ascii=False)
-                
-                # 重新加载配置
-                if self.reload_callback:
-                    await self.reload_callback()
-                
-                await self.send_message(
-                    f"✅ **域名同步成功**\n\n"
-                    f"📊 **统计**:\n"
-                    f"• 同步域名: {len(domains)} 个\n"
-                    f"• 来源Token: {token_name}\n\n"
-                    f"🔄 配置已重新加载，监控将使用新的域名列表\n\n"
-                    f"💡 使用 `/list` 查看当前监控域名",
-                    reply_to=msg_id
-                )
-                
-            except Exception as e:
-                await self.send_message(
-                    f"❌ **同步失败**\n\n"
-                    f"错误: 无法更新域名文件 - {str(e)}",
-                    reply_to=msg_id
-                )
-        else:
-            await self.send_message(
-                f"❌ **同步失败**\n\n"
                 f"错误: {result.get('error', '未知错误')}",
                 reply_to=msg_id
             )
@@ -1537,36 +1629,61 @@ class TelegramBot:
             reply_to=msg_id
         )
         
-        # 执行合并操作
-        result = await self.cf_manager.export_and_merge_domains(
-            str(user_id), token_name, merge_mode
+        # 不发送进度通知，只记录错误
+        async def progress_callback(domain: str, added_count: int, total_processed: int):
+            # 仅记录到日志，不发送Telegram消息
+            self.logger.debug(f"cfmerge进度: 已处理{total_processed}个域名，已添加{added_count}个域名")
+        
+        # 执行实时合并操作
+        result = await self.cf_manager.export_and_merge_domains_realtime(
+            str(user_id), token_name, merge_mode, progress_callback
         )
         
         if result["success"]:
             # 构建成功响应消息
-            response = f"✅ **域名{result['operation']}成功**\n\n"
-            response += f"📊 **操作统计**:\n"
-            response += f"• Token: {result['token_name']}\n"
-            response += f"• 合并模式: {result['merge_mode']}\n"
-            response += f"• CF域名数: {result['cf_domains_count']}\n"
-            response += f"• 操作前: {result['before_count']} 个域名\n"
-            response += f"• 操作后: {result['after_count']} 个域名\n"
-            
-            if result['added_count'] > 0:
-                response += f"• 新增域名: {result['added_count']} 个\n"
-            if result['removed_count'] > 0:
-                response += f"• 删除域名: {result['removed_count']} 个\n"
-            
-            response += f"\n💡 **提示**:\n"
-            response += f"• 配置已自动更新并保存\n"
-            response += f"• 使用 `/list` 查看当前监控域名\n"
-            response += f"• 使用 `/check` 立即开始监控"
-            
-            await self.send_message(response, reply_to=msg_id)
+            try:
+                operation = str(result.get('operation', '操作'))
+                token_name = str(result.get('token_name', '未知'))
+                merge_mode = str(result.get('merge_mode', '未知'))
+                
+                response = f"✅ **域名{operation}成功**\n\n"
+                response += f"📊 **操作统计**:\n"
+                response += f"• Token: {token_name}\n"
+                response += f"• 合并模式: {merge_mode}\n"
+                response += f"• CF域名数: {result.get('cf_domains_count', 0)}\n"
+                response += f"• 操作前: {result.get('before_count', 0)} 个域名\n"
+                response += f"• 操作后: {result.get('after_count', 0)} 个域名\n"
+                
+                if result.get('added_count', 0) > 0:
+                    response += f"• 新增域名: {result['added_count']} 个\n"
+                if result.get('removed_count', 0) > 0:
+                    response += f"• 删除域名: {result['removed_count']} 个\n"
+                
+                response += f"\n💡 **提示**:\n"
+                response += f"• 配置已自动更新并保存\n"
+                response += f"• 使用 `/list` 查看当前监控域名\n"
+                response += f"• 使用 `/check` 立即开始监控"
+                
+                # 确保消息不太长
+                if len(response) > 4000:
+                    response = response[:4000] + "..."
+                
+                await self.send_message(response, reply_to=msg_id)
+                
+            except Exception as e:
+                self.logger.error(f"发送成功消息失败: {e}")
+                await self.send_message("✅ 域名合并操作成功完成", reply_to=msg_id)
             
         else:
+            error_msg = result.get('error', '未知错误')
+            # 确保错误消息不会导致Telegram格式问题
+            if len(error_msg) > 500:
+                error_msg = error_msg[:500] + "..."
+            # 转义可能有问题的字符
+            error_msg = error_msg.replace('_', '\\_').replace('*', '\\*').replace('[', '\\[').replace('`', '\\`')
+            
             await self.send_message(
                 f"❌ **合并失败**\n\n"
-                f"错误: {result.get('error', '未知错误')}",
+                f"错误: {error_msg}",
                 reply_to=msg_id
             )

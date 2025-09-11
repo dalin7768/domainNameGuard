@@ -66,11 +66,15 @@ class ConfigManager:
             },
             "check": {
                 "interval_minutes": 30,
+                "max_concurrent": 10,
+                "auto_adjust_concurrent": True,
                 "timeout_seconds": 10,
                 "retry_count": 2,
-                "retry_delay_seconds": 5
+                "retry_delay_seconds": 5,
+                "batch_notify": False,
+                "show_eta": True
             },
-            "domains": [],
+            "domains": "domains.json",
             "notification": {
                 "level": "smart",  # all: 始终通知, error: 仅错误, smart: 智能通知(只通知变化)
                 "notify_on_recovery": True,
@@ -79,8 +83,43 @@ class ConfigManager:
             },
             "history": {
                 "enabled": True,
-                "retention_days": 30,  # 历史记录保留天数
-                "max_records": 10000  # 最大记录数
+                "retention_days": 30,
+                "max_records": 10000
+            },
+            "daily_report": {
+                "enabled": False,
+                "time": "00:00"
+            },
+            "cloudflare": {
+                "export": {
+                    "output_dir": "exports",
+                    "default_format": "json",
+                    "include_timestamp": False,
+                    "single_file_name": "cf_domains_{token_name}.{format}",
+                    "merged_file_name": "cf_all_domains.{format}",
+                    "auto_create_dir": True,
+                    "sync_delete": True
+                },
+                "merge": {
+                    "default_mode": "replace",
+                    "auto_format_domains": True,
+                    "confirm_replace": False
+                }
+            },
+            "http_api": {
+                "enabled": True,
+                "host": "0.0.0.0",
+                "port": 8080,
+                "cors_enabled": True,
+                "allowed_ips": [],
+                "rate_limit": {
+                    "enabled": False,
+                    "requests_per_minute": 60
+                },
+                "auth": {
+                    "enabled": False,
+                    "api_key": ""
+                }
             },
             "logging": {
                 "level": "INFO",
@@ -242,8 +281,17 @@ class ConfigManager:
                                 self.logger.error(f"域名文件格式错误: {domains_file}")
                                 return []
                     else:
-                        self.logger.warning(f"域名文件不存在: {domains_file}")
-                        return []
+                        self.logger.info(f"域名文件不存在，创建默认文件: {domains_file}")
+                        # 创建默认的空域名列表文件
+                        try:
+                            domains_file.parent.mkdir(parents=True, exist_ok=True)
+                            with open(domains_file, 'w', encoding='utf-8') as f:
+                                json.dump([], f, indent=2, ensure_ascii=False)
+                            self.logger.info(f"已创建默认域名文件: {domains_file}")
+                            return []
+                        except Exception as create_e:
+                            self.logger.error(f"创建域名文件失败: {create_e}")
+                            return []
                 except Exception as e:
                     self.logger.error(f"读取域名文件失败: {e}")
                     return []
@@ -378,6 +426,30 @@ class ConfigManager:
                     return True, f"已清空 {count} 个域名"
                 else:
                     return False, "保存配置失败"
+    
+    def update_domains(self, domains: List[str]) -> bool:
+        """更新域名列表
+        
+        Args:
+            domains: 新的域名列表
+            
+        Returns:
+            bool: 更新成功返回True，失败返回False
+        """
+        with self.lock:
+            try:
+                # 判断是否需要保存到外部文件
+                domains_config = self.config.get('domains', [])
+                if isinstance(domains_config, str):
+                    # 保存到外部文件
+                    return self._save_domains_to_file(domains)
+                else:
+                    # 保存到配置文件
+                    self.config['domains'] = domains.copy()
+                    return self.save_config()
+            except Exception as e:
+                self.logger.error(f"更新域名列表失败: {e}")
+                return False
     
     # 检查配置管理
     def set_interval(self, minutes: int) -> Tuple[bool, str]:

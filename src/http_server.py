@@ -7,10 +7,13 @@ HTTP API 服务器模块
 import json
 import logging
 import asyncio
-from typing import Optional, Dict, Any
+import time
+import ipaddress
+from typing import Optional, Dict, Any, List
 from aiohttp import web, ClientSession
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
+from collections import defaultdict
 
 
 class HttpApiServer:
@@ -35,6 +38,15 @@ class HttpApiServer:
         self.host = "127.0.0.1"
         self.port = 8080
         self.enabled = False
+        self.cors_enabled = True
+        self.allowed_ips = []
+        self.auth_enabled = False
+        self.api_key = ""
+        self.rate_limit_enabled = False
+        self.requests_per_minute = 60
+        
+        # 频率限制存储
+        self.request_counts = defaultdict(list)
         
         # 加载配置
         self._load_config()
@@ -47,8 +59,27 @@ class HttpApiServer:
                 self.host = http_config.get("host", "127.0.0.1")
                 self.port = http_config.get("port", 8080)
                 self.enabled = http_config.get("enabled", False)
+                self.cors_enabled = http_config.get("cors_enabled", True)
+                self.allowed_ips = http_config.get("allowed_ips", [])
+                
+                # 认证配置
+                auth_config = http_config.get("auth", {})
+                self.auth_enabled = auth_config.get("enabled", False)
+                self.api_key = auth_config.get("api_key", "")
+                
+                # 频率限制配置
+                rate_config = http_config.get("rate_limit", {})
+                self.rate_limit_enabled = rate_config.get("enabled", False)
+                self.requests_per_minute = rate_config.get("requests_per_minute", 60)
                 
                 self.logger.info(f"HTTP API配置加载完成: {self.host}:{self.port}, 启用: {self.enabled}")
+                if self.allowed_ips:
+                    self.logger.info(f"IP白名单: {self.allowed_ips}")
+                if self.auth_enabled:
+                    self.logger.info("API密钥认证已启用")
+                if self.rate_limit_enabled:
+                    self.logger.info(f"频率限制已启用: {self.requests_per_minute}/分钟")
+                    
             except Exception as e:
                 self.logger.warning(f"加载HTTP API配置失败，使用默认配置: {e}")
     
@@ -61,37 +92,108 @@ class HttpApiServer:
         app.router.add_get('/health', self.handle_health_check)
         app.router.add_get('/status', self.handle_status)
         
-        # 添加CORS中间件（如果需要）
-        app.middlewares.append(self.cors_middleware)
-        app.middlewares.append(self.error_middleware)
+        # 添加中间件（使用装饰器包装）
+        app.middlewares.append(self._make_error_middleware())
+        app.middlewares.append(self._make_cors_middleware())
+        app.middlewares.append(self._make_security_middleware())
         
         return app
     
-    async def cors_middleware(self, request, handler):
-        """CORS中间件"""
-        response = await handler(request)
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization'
-        return response
-    
-    async def error_middleware(self, request, handler):
-        """错误处理中间件"""
+    def _is_ip_allowed(self, ip: str) -> bool:
+        """检查IP是否在白名单中"""
+        if not self.allowed_ips:
+            return True  # 空白名单表示允许所有IP
+        
         try:
-            return await handler(request)
-        except Exception as e:
-            self.logger.error(f"HTTP请求处理错误: {e}\n{traceback.format_exc()}")
-            return web.json_response({
-                "success": False,
-                "error": f"服务器内部错误: {str(e)}",
-                "timestamp": datetime.now().isoformat()
-            }, status=500)
+            client_ip = ipaddress.ip_address(ip)
+            for allowed in self.allowed_ips:
+                if '/' in allowed:  # CIDR格式
+                    if client_ip in ipaddress.ip_network(allowed, strict=False):
+                        return True
+                else:  # 单个IP
+                    if client_ip == ipaddress.ip_address(allowed):
+                        return True
+            return False
+        except (ipaddress.AddressValueError, ValueError):
+            self.logger.warning(f"无效的IP地址: {ip}")
+            return False
+    
+    def _is_rate_limited(self, ip: str) -> bool:
+        """检查IP是否超过频率限制"""
+        if not self.rate_limit_enabled:
+            return False
+        
+        now = datetime.now()
+        minute_ago = now - timedelta(minutes=1)
+        
+        # 清理过期的请求记录
+        self.request_counts[ip] = [
+            req_time for req_time in self.request_counts[ip] 
+            if req_time > minute_ago
+        ]
+        
+        # 检查当前分钟的请求数
+        if len(self.request_counts[ip]) >= self.requests_per_minute:
+            return True
+        
+        # 记录当前请求
+        self.request_counts[ip].append(now)
+        return False
+    
+    def _is_authenticated(self, request) -> bool:
+        """检查API密钥认证"""
+        if not self.auth_enabled:
+            return True
+        
+        # 检查Authorization header
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+            return token == self.api_key
+        
+        # 检查X-API-Key header
+        api_key_header = request.headers.get('X-API-Key', '')
+        if api_key_header == self.api_key:
+            return True
+        
+        # 检查查询参数
+        api_key_param = request.query.get('api_key', '')
+        if api_key_param == self.api_key:
+            return True
+        
+        return False
+    
+    def _get_client_ip(self, request) -> str:
+        """获取客户端IP地址"""
+        # 首先检查X-Forwarded-For头（代理情况）
+        forwarded_for = request.headers.get('X-Forwarded-For')
+        if forwarded_for:
+            # 取第一个IP（原始客户端IP）
+            return forwarded_for.split(',')[0].strip()
+        
+        # 检查X-Real-IP头
+        real_ip = request.headers.get('X-Real-IP')
+        if real_ip:
+            return real_ip.strip()
+        
+        # 最后从transport获取peername
+        try:
+            if hasattr(request, 'transport') and request.transport:
+                peername = request.transport.get_extra_info('peername')
+                if peername:
+                    return peername[0]
+        except Exception:
+            pass
+        
+        # 如果都获取不到，返回默认值
+        return '127.0.0.1'
     
     async def handle_send_message(self, request):
         """处理发送消息接口"""
         try:
             # 解析请求数据
-            if request.content_type == 'application/json':
+            content_type = request.headers.get('content-type', '').lower()
+            if 'application/json' in content_type:
                 data = await request.json()
             else:
                 data = await request.post()
@@ -126,15 +228,14 @@ class HttpApiServer:
                 }, status=503)
             
             # 记录API请求
-            client_ip = request.remote
+            client_ip = self._get_client_ip(request)
             user_agent = request.headers.get('User-Agent', 'Unknown')
             self.logger.info(f"API请求 - IP: {client_ip}, UA: {user_agent}, 消息长度: {len(message)}")
             
-            # 发送消息
+            # 发送消息（TelegramBot.send_message只支持text和parse_mode参数）
             success = await self.telegram_bot.send_message(
                 message, 
-                parse_mode=parse_mode,
-                disable_web_page_preview=disable_preview
+                parse_mode=parse_mode
             )
             
             if success:
@@ -245,6 +346,85 @@ class HttpApiServer:
                 
         except Exception as e:
             self.logger.error(f"停止HTTP API服务器错误: {e}")
+    
+    def _make_security_middleware(self):
+        """创建安全中间件包装器"""
+        @web.middleware
+        async def security_middleware(request, handler):
+            client_ip = self._get_client_ip(request)
+            
+            # IP白名单检查
+            if not self._is_ip_allowed(client_ip):
+                self.logger.warning(f"IP {client_ip} 不在白名单中，拒绝访问")
+                return web.json_response({
+                    "success": False,
+                    "error": "访问被拒绝",
+                    "timestamp": datetime.now().isoformat()
+                }, status=403)
+            
+            # 频率限制检查
+            if self._is_rate_limited(client_ip):
+                self.logger.warning(f"IP {client_ip} 超过频率限制")
+                return web.json_response({
+                    "success": False,
+                    "error": "请求过于频繁，请稍后再试",
+                    "timestamp": datetime.now().isoformat()
+                }, status=429)
+            
+            # API密钥认证检查
+            if not self._is_authenticated(request):
+                self.logger.warning(f"IP {client_ip} 认证失败")
+                return web.json_response({
+                    "success": False,
+                    "error": "认证失败",
+                    "timestamp": datetime.now().isoformat()
+                }, status=401)
+            
+            return await handler(request)
+        
+        return security_middleware
+    
+    def _make_cors_middleware(self):
+        """创建CORS中间件包装器"""
+        @web.middleware
+        async def cors_middleware(request, handler):
+            # 处理OPTIONS预检请求
+            if request.method == 'OPTIONS':
+                response = web.Response()
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-API-Key'
+                response.headers['Access-Control-Max-Age'] = '86400'
+                return response
+            
+            # 调用下一个处理器
+            response = await handler(request)
+            
+            # 添加CORS头到响应
+            if hasattr(response, 'headers'):
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                response.headers['Access-Control-Allow-Methods'] = 'GET, POST, OPTIONS'
+                response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-API-Key'
+            
+            return response
+        
+        return cors_middleware
+    
+    def _make_error_middleware(self):
+        """创建错误处理中间件包装器"""
+        @web.middleware
+        async def error_middleware(request, handler):
+            try:
+                return await handler(request)
+            except Exception as e:
+                self.logger.error(f"HTTP请求处理错误: {e}\n{traceback.format_exc()}")
+                return web.json_response({
+                    "success": False,
+                    "error": f"服务器内部错误: {str(e)}",
+                    "timestamp": datetime.now().isoformat()
+                }, status=500)
+        
+        return error_middleware
 
 
 # 使用示例和测试
