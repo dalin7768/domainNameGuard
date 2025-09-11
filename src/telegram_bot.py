@@ -5,6 +5,7 @@ from typing import Dict, Optional, Callable, Any
 from datetime import datetime
 import json
 from config_manager import ConfigManager
+from cloudflare_manager import CloudflareManager
 
 
 class TelegramBot:
@@ -21,6 +22,9 @@ class TelegramBot:
         self.bot_token = config_manager.get('telegram.bot_token')
         self.chat_id = config_manager.get('telegram.chat_id')
         self.logger = logging.getLogger(__name__)
+        
+        # Cloudflare管理器
+        self.cf_manager = CloudflareManager(config_manager=config_manager)
         
         # API 基础 URL
         self.api_base_url = f"https://api.telegram.org/bot{self.bot_token}"
@@ -64,7 +68,18 @@ class TelegramBot:
             '/stop': self.cmd_stop,
             '/restart': self.cmd_restart,
             '/reload': self.cmd_reload,
-            '/dailyreport': self.cmd_daily_report
+            '/dailyreport': self.cmd_daily_report,
+            
+            # Cloudflare相关命令
+            '/cf': self.cmd_cloudflare_help,
+            '/cftoken': self.cmd_manage_cf_token,
+            '/cflist': self.cmd_list_cf_tokens,
+            '/cfzones': self.cmd_get_cf_zones,
+            '/cfexport': self.cmd_export_cf_domains,
+            '/cfexportall': self.cmd_export_all_cf_domains,
+            '/cfverify': self.cmd_verify_cf_token,
+            '/cfdomains': self.cmd_sync_cf_domains,
+            '/cfmerge': self.cmd_merge_cf_domains
         }
         
         # 检查回调函数
@@ -339,6 +354,14 @@ class TelegramBot:
 👥 **管理员**:
 `/admin list` - 查看管理员
 `/admin add/remove ID` - 管理管理员
+
+☁️ **Cloudflare集成**:
+`/cf` - 查看Cloudflare帮助
+`/cftoken add/remove` - 管理API Token
+`/cflist` - 查看我的Token列表
+`/cfzones 名称` - 获取域名列表
+`/cfexport 名称` - 导出域名到文件
+`/cfdomains 名称` - 同步到监控列表
 
 💡 **使用说明**:
 • 支持批量操作，用空格或逗号分隔
@@ -1117,3 +1140,433 @@ class TelegramBot:
                 await asyncio.sleep(5)
         
         self.logger.info("Telegram 命令监听已停止")
+    
+    # ==================== Cloudflare 相关命令 ====================
+    
+    async def cmd_cloudflare_help(self, args: str, msg_id: int, user_id: int, username: str):
+        """Cloudflare帮助命令"""
+        help_text = """☁️ **Cloudflare 域名管理**
+
+🔑 **Token 管理**:
+`/cftoken add 名称 YOUR_API_TOKEN` - 添加API Token
+`/cftoken remove 名称` - 删除API Token  
+`/cflist` - 查看我的Token列表
+`/cfverify 名称` - 验证Token是否有效
+
+🌐 **域名操作**:
+`/cfzones 名称` - 获取Token下的所有域名
+`/cfexport 名称 [格式] [sync]` - 导出单个Token域名到文件
+`/cfexportall [格式] [sync]` - 导出所有Token域名到文件（合并）
+`/cfdomains 名称` - 同步域名到监控列表
+`/cfmerge [名称] [模式]` - 导出并直接合并到监控配置
+
+📝 **使用说明**:
+• 每个用户可以添加多个API Token
+• Token名称用于区分不同账号
+• 导出支持txt、json、csv格式
+• 支持同步删除功能（sync参数）
+• 可单独或合并导出所有Token域名
+• cfmerge直接更新监控配置，无需手动同步
+
+💡 **示例**:
+`/cftoken add 主账号 abcd1234...`
+`/cfzones 主账号`
+`/cfexport 主账号 json sync` - 导出为JSON并同步删除
+`/cfexportall txt` - 合并导出所有Token为TXT格式
+`/cfmerge 主账号 replace` - 用主账号域名替换监控列表
+`/cfmerge merge` - 合并所有Token域名到监控列表"""
+        
+        await self.send_message(help_text, reply_to=msg_id)
+    
+    async def cmd_manage_cf_token(self, args: str, msg_id: int, user_id: int, username: str):
+        """管理Cloudflare Token"""
+        if not args:
+            await self.send_message(
+                "❌ 请提供操作类型\n\n"
+                "**使用方法**:\n"
+                "`/cftoken add 名称 TOKEN` - 添加Token\n"
+                "`/cftoken remove 名称` - 删除Token\n\n"
+                "**示例**:\n"
+                "`/cftoken add 主账号 abcd1234efgh5678...`",
+                reply_to=msg_id
+            )
+            return
+        
+        parts = args.split()
+        if len(parts) < 2:
+            await self.send_message("❌ 参数不足", reply_to=msg_id)
+            return
+        
+        action = parts[0].lower()
+        token_name = parts[1]
+        
+        if action == "add":
+            if len(parts) < 3:
+                await self.send_message("❌ 请提供API Token", reply_to=msg_id)
+                return
+            
+            api_token = parts[2]
+            success, message = self.cf_manager.token_manager.add_user_token(
+                str(user_id), token_name, api_token
+            )
+            
+            if success:
+                await self.send_message(f"✅ {message}", reply_to=msg_id)
+            else:
+                await self.send_message(f"❌ {message}", reply_to=msg_id)
+        
+        elif action == "remove":
+            success, message = self.cf_manager.token_manager.remove_user_token(
+                str(user_id), token_name
+            )
+            
+            if success:
+                await self.send_message(f"✅ {message}", reply_to=msg_id)
+            else:
+                await self.send_message(f"❌ {message}", reply_to=msg_id)
+        
+        else:
+            await self.send_message("❌ 无效的操作，请使用 add 或 remove", reply_to=msg_id)
+    
+    async def cmd_list_cf_tokens(self, args: str, msg_id: int, user_id: int, username: str):
+        """列出用户的Cloudflare Tokens"""
+        token_list = self.cf_manager.token_manager.list_user_tokens(str(user_id))
+        await self.send_message(token_list, reply_to=msg_id)
+    
+    async def cmd_verify_cf_token(self, args: str, msg_id: int, user_id: int, username: str):
+        """验证Cloudflare Token"""
+        if not args:
+            await self.send_message(
+                "❌ 请提供Token名称\n\n"
+                "**示例**: `/cfverify 主账号`",
+                reply_to=msg_id
+            )
+            return
+        
+        token_name = args.strip()
+        await self.send_message("🔄 正在验证Token...", reply_to=msg_id)
+        
+        result = await self.cf_manager.verify_user_token(str(user_id), token_name)
+        
+        if result["valid"]:
+            await self.send_message(
+                f"✅ **Token验证成功**\n\n"
+                f"Token名称: {token_name}\n"
+                f"Token ID: {result.get('token_id', 'N/A')}\n"
+                f"状态: {result.get('status', 'active')}",
+                reply_to=msg_id
+            )
+        else:
+            await self.send_message(
+                f"❌ **Token验证失败**\n\n"
+                f"错误: {result.get('error', '未知错误')}",
+                reply_to=msg_id
+            )
+    
+    async def cmd_get_cf_zones(self, args: str, msg_id: int, user_id: int, username: str):
+        """获取Cloudflare域名zones"""
+        if not args:
+            await self.send_message(
+                "❌ 请提供Token名称\n\n"
+                "**示例**: `/cfzones 主账号`",
+                reply_to=msg_id
+            )
+            return
+        
+        token_name = args.strip()
+        await self.send_message("🔄 正在获取域名列表...", reply_to=msg_id)
+        
+        result = await self.cf_manager.get_user_zones(str(user_id), token_name)
+        
+        if result["success"]:
+            zones = result["zones"]
+            if not zones:
+                await self.send_message(
+                    f"📝 **Token '{token_name}' 下没有域名**",
+                    reply_to=msg_id
+                )
+                return
+            
+            # 构建域名列表
+            zone_list = f"🌐 **域名列表** ({len(zones)} 个)\n\n"
+            for i, zone in enumerate(zones[:20], 1):  # 最多显示20个
+                zone_name = zone.get("name", "")
+                zone_status = zone.get("status", "")
+                status_emoji = "🟢" if zone_status == "active" else "🟡"
+                zone_list += f"{i}. {status_emoji} `{zone_name}`\n"
+            
+            if len(zones) > 20:
+                zone_list += f"\n... 还有 {len(zones) - 20} 个域名"
+            
+            zone_list += f"\n\n💡 使用 `/cfexport {token_name}` 导出所有域名"
+            
+            await self.send_message(zone_list, reply_to=msg_id)
+        else:
+            await self.send_message(
+                f"❌ **获取域名失败**\n\n"
+                f"错误: {result.get('error', '未知错误')}",
+                reply_to=msg_id
+            )
+    
+    async def cmd_export_cf_domains(self, args: str, msg_id: int, user_id: int, username: str):
+        """导出单个Token的Cloudflare域名"""
+        if not args:
+            await self.send_message(
+                "❌ 请提供Token名称\n\n"
+                "**示例**: `/cfexport 主账号 [格式] [sync]`\n"
+                "• **格式**: txt, json, csv (可选)\n"
+                "• **sync**: 添加此参数启用同步删除功能",
+                reply_to=msg_id
+            )
+            return
+        
+        parts = args.split()
+        token_name = parts[0]
+        format_type = parts[1] if len(parts) > 1 and parts[1] in ["txt", "json", "csv"] else None
+        sync_delete = "sync" in parts
+        
+        await self.send_message("🔄 正在导出域名，请稍候...", reply_to=msg_id)
+        
+        result = await self.cf_manager.export_single_token_domains(
+            str(user_id), token_name, format_type, sync_delete
+        )
+        
+        if result["success"]:
+            # 构建响应消息
+            response = f"✅ **单个Token域名导出成功**\n\n"
+            response += f"📊 **统计信息**:\n"
+            response += f"• Token名称: `{token_name}`\n"
+            response += f"• 域名总数: {result['total_domains']}\n"
+            response += f"• Zone数量: {result['total_zones']}\n"
+            response += f"• 导出文件: `{result['export_filename']}`\n"
+            response += f"• 文件路径: `{result['export_file']}`\n"
+            
+            if result.get("sync_delete_count", 0) > 0:
+                response += f"• 同步删除: {result['sync_delete_count']} 个域名\n"
+            
+            # 显示前10个域名作为预览
+            domains = result["domains"]
+            if domains:
+                response += f"\n📝 **域名预览** (前10个):\n"
+                for i, domain in enumerate(domains[:10], 1):
+                    response += f"{i}. `{domain}`\n"
+                
+                if len(domains) > 10:
+                    response += f"... 还有 {len(domains) - 10} 个域名\n"
+            
+            response += f"\n💡 **其他操作**:\n"
+            response += f"• `/cfdomains {token_name}` - 同步到监控列表\n"
+            response += f"• `/cfexportall` - 导出所有Token域名"
+            
+            await self.send_message(response, reply_to=msg_id)
+        else:
+            await self.send_message(
+                f"❌ **导出失败**\n\n"
+                f"错误: {result.get('error', '未知错误')}",
+                reply_to=msg_id
+            )
+    
+    async def cmd_export_all_cf_domains(self, args: str, msg_id: int, user_id: int, username: str):
+        """导出用户所有Token的域名（合并）"""
+        parts = args.split() if args else []
+        format_type = parts[0] if len(parts) > 0 and parts[0] in ["txt", "json", "csv"] else None
+        sync_delete = "sync" in parts
+        
+        await self.send_message("🔄 正在导出所有Token的域名，请稍候...", reply_to=msg_id)
+        
+        result = await self.cf_manager.export_all_user_tokens_domains(
+            str(user_id), format_type, sync_delete
+        )
+        
+        if result["success"]:
+            # 构建响应消息
+            response = f"✅ **所有Token域名导出成功**\n\n"
+            response += f"📊 **统计信息**:\n"
+            response += f"• Token总数: {result['total_tokens']}\n"
+            response += f"• 域名总数: {result['total_domains']}\n"
+            response += f"• Zone总数: {result['total_zones']}\n"
+            response += f"• 导出文件: `{result['export_filename']}`\n"
+            response += f"• 文件路径: `{result['export_file']}`\n"
+            
+            if result.get("sync_delete_count", 0) > 0:
+                response += f"• 同步删除: {result['sync_delete_count']} 个域名\n"
+            
+            # 显示每个Token的详情
+            token_results = result.get("token_results", {})
+            if token_results:
+                response += f"\n📝 **Token详情**:\n"
+                for token_name, token_result in token_results.items():
+                    if token_result["success"]:
+                        response += f"• `{token_name}`: {token_result['count']} 个域名 ({token_result['zones']} zones)\n"
+                    else:
+                        response += f"• `{token_name}`: ❌ {token_result['error']}\n"
+            
+            # 显示前10个域名作为预览
+            domains = result["domains"]
+            if domains:
+                response += f"\n📝 **域名预览** (前10个):\n"
+                for i, domain in enumerate(domains[:10], 1):
+                    response += f"{i}. `{domain}`\n"
+                
+                if len(domains) > 10:
+                    response += f"... 还有 {len(domains) - 10} 个域名\n"
+            
+            response += f"\n💡 **其他操作**:\n"
+            response += f"• `/cfdomains 合并文件名` - 同步合并结果到监控列表"
+            
+            await self.send_message(response, reply_to=msg_id)
+        else:
+            await self.send_message(
+                f"❌ **导出失败**\n\n"
+                f"错误: {result.get('error', '未知错误')}",
+                reply_to=msg_id
+            )
+    
+    async def cmd_sync_cf_domains(self, args: str, msg_id: int, user_id: int, username: str):
+        """同步Cloudflare域名到监控列表"""
+        if not args:
+            await self.send_message(
+                "❌ 请提供Token名称\n\n"
+                "**示例**: `/cfdomains 主账号`\n\n"
+                "⚠️ **注意**: 此操作将覆盖当前监控列表",
+                reply_to=msg_id
+            )
+            return
+        
+        token_name = args.strip()
+        await self.send_message("🔄 正在同步域名到监控列表...", reply_to=msg_id)
+        
+        # 先导出域名
+        result = await self.cf_manager.export_user_domains(str(user_id), token_name)
+        
+        if result["success"]:
+            domains = result["domains"]
+            
+            if not domains:
+                await self.send_message("❌ 没有找到任何域名", reply_to=msg_id)
+                return
+            
+            # 更新domains.json文件
+            try:
+                with open("domains.json", "w", encoding="utf-8") as f:
+                    json.dump(domains, f, indent=2, ensure_ascii=False)
+                
+                # 重新加载配置
+                if self.reload_callback:
+                    await self.reload_callback()
+                
+                await self.send_message(
+                    f"✅ **域名同步成功**\n\n"
+                    f"📊 **统计**:\n"
+                    f"• 同步域名: {len(domains)} 个\n"
+                    f"• 来源Token: {token_name}\n\n"
+                    f"🔄 配置已重新加载，监控将使用新的域名列表\n\n"
+                    f"💡 使用 `/list` 查看当前监控域名",
+                    reply_to=msg_id
+                )
+                
+            except Exception as e:
+                await self.send_message(
+                    f"❌ **同步失败**\n\n"
+                    f"错误: 无法更新域名文件 - {str(e)}",
+                    reply_to=msg_id
+                )
+        else:
+            await self.send_message(
+                f"❌ **同步失败**\n\n"
+                f"错误: {result.get('error', '未知错误')}",
+                reply_to=msg_id
+            )
+    
+    async def cmd_merge_cf_domains(self, args: str, msg_id: int, user_id: int, username: str):
+        """导出CF域名并直接合并到domains配置"""
+        parts = args.split() if args else []
+        
+        # 解析参数
+        token_name = None
+        merge_mode = "replace"  # 默认替换模式
+        
+        # 解析命令参数
+        for part in parts:
+            if part in ["replace", "merge", "add"]:
+                merge_mode = part
+            elif part not in ["replace", "merge", "add"]:
+                token_name = part
+        
+        # 如果没有指定token名称，询问用户
+        if not token_name and merge_mode == "replace":
+            # 获取用户的token列表
+            user_tokens = self.cf_manager.token_manager.get_user_tokens(str(user_id))
+            if not user_tokens:
+                await self.send_message("❌ 您还没有添加任何Cloudflare Token", reply_to=msg_id)
+                return
+                
+            if len(user_tokens) == 1:
+                token_name = user_tokens[0]["name"]
+            else:
+                token_list = "\n".join([f"• `{token['name']}`" for token in user_tokens])
+                await self.send_message(
+                    "❌ 请指定Token名称或合并模式\n\n"
+                    "**用法**:\n"
+                    "`/cfmerge [Token名称] [模式]`\n\n"
+                    "**可用Token**:\n"
+                    f"{token_list}\n\n"
+                    "**合并模式**:\n"
+                    "• `replace` - 完全替换现有域名（默认）\n"
+                    "• `merge` - 合并现有域名和CF域名\n"
+                    "• `add` - 只添加新的CF域名\n\n"
+                    "**示例**:\n"
+                    "`/cfmerge 主账号 replace` - 用主账号域名替换\n"
+                    "`/cfmerge merge` - 合并所有Token域名",
+                    reply_to=msg_id
+                )
+                return
+        
+        # 显示操作提示
+        mode_desc = {
+            "replace": "替换所有域名",
+            "merge": "合并域名", 
+            "add": "添加新域名"
+        }
+        
+        token_desc = token_name or "所有Token"
+        await self.send_message(
+            f"🔄 正在{mode_desc[merge_mode]}...\n"
+            f"• Token: {token_desc}\n"
+            f"• 模式: {merge_mode}",
+            reply_to=msg_id
+        )
+        
+        # 执行合并操作
+        result = await self.cf_manager.export_and_merge_domains(
+            str(user_id), token_name, merge_mode
+        )
+        
+        if result["success"]:
+            # 构建成功响应消息
+            response = f"✅ **域名{result['operation']}成功**\n\n"
+            response += f"📊 **操作统计**:\n"
+            response += f"• Token: {result['token_name']}\n"
+            response += f"• 合并模式: {result['merge_mode']}\n"
+            response += f"• CF域名数: {result['cf_domains_count']}\n"
+            response += f"• 操作前: {result['before_count']} 个域名\n"
+            response += f"• 操作后: {result['after_count']} 个域名\n"
+            
+            if result['added_count'] > 0:
+                response += f"• 新增域名: {result['added_count']} 个\n"
+            if result['removed_count'] > 0:
+                response += f"• 删除域名: {result['removed_count']} 个\n"
+            
+            response += f"\n💡 **提示**:\n"
+            response += f"• 配置已自动更新并保存\n"
+            response += f"• 使用 `/list` 查看当前监控域名\n"
+            response += f"• 使用 `/check` 立即开始监控"
+            
+            await self.send_message(response, reply_to=msg_id)
+            
+        else:
+            await self.send_message(
+                f"❌ **合并失败**\n\n"
+                f"错误: {result.get('error', '未知错误')}",
+                reply_to=msg_id
+            )

@@ -22,6 +22,7 @@ from domain_checker import DomainChecker, CheckResult, CheckStatus
 from telegram_notifier import TelegramNotifier
 from telegram_bot import TelegramBot
 from error_tracker import ErrorTracker
+from http_server import HttpApiServer
 
 
 class DomainMonitor:
@@ -48,12 +49,14 @@ class DomainMonitor:
         self.bot: Optional[TelegramBot] = None            # Telegram 命令处理器
         self.logger: Optional[logging.Logger] = None      # 日志记录器
         self.error_tracker: Optional[ErrorTracker] = None # 错误状态跟踪器
+        self.http_server: Optional[HttpApiServer] = None  # HTTP API服务器
         self.is_running = True                             # 运行状态标志
         
         # 异步任务管理
         self.check_task: Optional[asyncio.Task] = None    # 当前的检查任务
         self.bot_task: Optional[asyncio.Task] = None      # Bot 监听任务
         self.schedule_task: Optional[asyncio.Task] = None # 定时调度任务
+        self.http_task: Optional[asyncio.Task] = None     # HTTP服务器任务
         
         # 存储当前运行中的间隔时间（用于比较）
         self.current_interval: Optional[int] = None
@@ -202,6 +205,10 @@ class DomainMonitor:
                 error_tracker=self.get_error_tracker  # 获取错误跟踪器
             )
             self.logger.info("Telegram Bot 初始化完成")
+            
+            # 步骤5：初始化 HTTP API 服务器
+            self.http_server = HttpApiServer(self.config_manager, self.bot)
+            self.logger.info("HTTP API 服务器初始化完成")
             
             return True
             
@@ -611,6 +618,12 @@ class DomainMonitor:
                 self.schedule_task.cancel()
             if self.daily_report_task and not self.daily_report_task.done():
                 self.daily_report_task.cancel()
+            # 停止HTTP服务器
+            if self.http_server:
+                try:
+                    await self.http_server.stop_server()
+                except Exception as e:
+                    self.logger.error(f"停止HTTP服务器失败: {e}")
             self.logger.info("强制停止：已取消所有任务")
             return
         
@@ -631,6 +644,14 @@ class DomainMonitor:
         if self.daily_report_task and not self.daily_report_task.done():
             self.daily_report_task.cancel()
             tasks.append(self.daily_report_task)
+        
+        # 停止HTTP服务器
+        if self.http_server:
+            try:
+                await self.http_server.stop_server()
+                self.logger.info("HTTP API 服务器已停止")
+            except Exception as e:
+                self.logger.error(f"停止HTTP服务器失败: {e}")
         
         # 等待所有任务完成
         # return_exceptions=True 确保即使任务抛出异常也不会中断
@@ -957,6 +978,11 @@ class DomainMonitor:
         # 启动 Bot 监听
         self.bot_task = asyncio.create_task(self.bot.listen_for_commands())
         self.logger.info("Telegram Bot 命令监听已启动")
+        
+        # 启动 HTTP API 服务器
+        if self.http_server:
+            await self.http_server.start_server()
+            self.logger.info("HTTP API 服务器已启动")
         
         # 发送启动通知
         domains = self.config_manager.get_domains()

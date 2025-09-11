@@ -221,7 +221,60 @@ class ConfigManager:
     def get_domains(self) -> List[str]:
         """获取所有域名"""
         with self.lock:
-            return self.config.get('domains', []).copy()
+            domains_config = self.config.get('domains', [])
+            
+            # 如果domains是字符串（文件路径），从文件加载域名
+            if isinstance(domains_config, str):
+                try:
+                    # 构造完整的文件路径
+                    if not Path(domains_config).is_absolute():
+                        domains_file = self.config_file.parent / domains_config
+                    else:
+                        domains_file = Path(domains_config)
+                    
+                    # 读取域名文件
+                    if domains_file.exists():
+                        with open(domains_file, 'r', encoding='utf-8') as f:
+                            domains = json.load(f)
+                            if isinstance(domains, list):
+                                return domains.copy()
+                            else:
+                                self.logger.error(f"域名文件格式错误: {domains_file}")
+                                return []
+                    else:
+                        self.logger.warning(f"域名文件不存在: {domains_file}")
+                        return []
+                except Exception as e:
+                    self.logger.error(f"读取域名文件失败: {e}")
+                    return []
+            
+            # 如果domains是列表，直接返回
+            elif isinstance(domains_config, list):
+                return domains_config.copy()
+            
+            # 其他情况返回空列表
+            else:
+                return []
+    
+    def _save_domains_to_file(self, domains: List[str]) -> bool:
+        """保存域名到外部文件"""
+        try:
+            domains_config = self.config.get('domains', [])
+            if isinstance(domains_config, str):
+                # 构造完整的文件路径
+                if not Path(domains_config).is_absolute():
+                    domains_file = self.config_file.parent / domains_config
+                else:
+                    domains_file = Path(domains_config)
+                
+                # 保存域名到文件
+                with open(domains_file, 'w', encoding='utf-8') as f:
+                    json.dump(domains, f, indent=2, ensure_ascii=False)
+                return True
+            return False
+        except Exception as e:
+            self.logger.error(f"保存域名文件失败: {e}")
+            return False
     
     def add_domain(self, url: str) -> Tuple[bool, str]:
         """添加要监控的域名
@@ -235,7 +288,7 @@ class ConfigManager:
             Tuple[bool, str]: (是否成功, 结果消息)
         """
         with self.lock:
-            domains = self.config.get('domains', [])
+            domains = self.get_domains()  # 使用get_domains()方法获取域名
             
             # 去除空格
             url = url.strip()
@@ -246,12 +299,22 @@ class ConfigManager:
                     return False, f"域名 {url} 已存在"
             
             domains.append(url)
-            self.config['domains'] = domains
             
-            if self.save_config():
-                return True, f"✅ 成功添加: {url}"
+            # 判断是否需要保存到外部文件
+            domains_config = self.config.get('domains', [])
+            if isinstance(domains_config, str):
+                # 保存到外部文件
+                if self._save_domains_to_file(domains):
+                    return True, f"✅ 成功添加: {url}"
+                else:
+                    return False, "保存域名文件失败"
             else:
-                return False, "保存配置失败"
+                # 保存到配置文件
+                self.config['domains'] = domains
+                if self.save_config():
+                    return True, f"✅ 成功添加: {url}"
+                else:
+                    return False, "保存配置失败"
     
     def remove_domain(self, url: str) -> Tuple[bool, str]:
         """删除监控的域名
@@ -263,7 +326,7 @@ class ConfigManager:
             Tuple[bool, str]: (是否成功, 结果消息)
         """
         with self.lock:
-            domains = self.config.get('domains', [])
+            domains = self.get_domains()  # 使用get_domains()方法获取域名
             url = url.strip()
             
             # 尝试匹配（忽略协议）
@@ -277,23 +340,44 @@ class ConfigManager:
                 return False, f"域名 {url} 不存在"
             
             domains.remove(found)
-            self.config['domains'] = domains
             
-            if self.save_config():
-                return True, f"❌ 已删除: {url}"
+            # 判断是否需要保存到外部文件
+            domains_config = self.config.get('domains', [])
+            if isinstance(domains_config, str):
+                # 保存到外部文件
+                if self._save_domains_to_file(domains):
+                    return True, f"❌ 已删除: {url}"
+                else:
+                    return False, "保存域名文件失败"
             else:
-                return False, "保存配置失败"
+                # 保存到配置文件
+                self.config['domains'] = domains
+                if self.save_config():
+                    return True, f"❌ 已删除: {url}"
+                else:
+                    return False, "保存配置失败"
     
     def clear_domains(self) -> tuple[bool, str]:
         """清空所有域名"""
         with self.lock:
-            count = len(self.config.get('domains', []))
-            self.config['domains'] = []
+            count = len(self.get_domains())
+            empty_domains = []
             
-            if self.save_config():
-                return True, f"已清空 {count} 个域名"
+            # 判断是否需要保存到外部文件
+            domains_config = self.config.get('domains', [])
+            if isinstance(domains_config, str):
+                # 保存到外部文件
+                if self._save_domains_to_file(empty_domains):
+                    return True, f"已清空 {count} 个域名"
+                else:
+                    return False, "保存域名文件失败"
             else:
-                return False, "保存配置失败"
+                # 保存到配置文件
+                self.config['domains'] = empty_domains
+                if self.save_config():
+                    return True, f"已清空 {count} 个域名"
+                else:
+                    return False, "保存配置失败"
     
     # 检查配置管理
     def set_interval(self, minutes: int) -> Tuple[bool, str]:

@@ -1,47 +1,74 @@
 # 域名监控服务 (Domain Monitor)
 
-一个基于 Python 的异步域名监控服务，支持批量检查域名可用性并通过 Telegram Bot 发送通知。
+一个功能强大的异步域名监控服务，集成Cloudflare API管理，支持批量检查域名可用性并通过Telegram Bot进行实时通知和远程控制。
 
-## ✨ 功能特性
+## ✨ 核心功能
 
-- 🔍 **批量域名监控** - 支持同时监控数百个域名
-- ⚡ **高性能异步检查** - 使用 asyncio 和连接池技术
-- 📱 **Telegram 机器人** - 实时通知和远程控制
-- 🔄 **自适应并发** - 根据系统资源自动调整并发数
-- 📊 **智能重试** - 仅对超时和连接错误进行重试
-- 🎯 **灵活配置** - 支持热重载，无需重启服务
-- 📈 **进度显示** - 实时显示检查进度和预计完成时间
-- 🛡️ **生产就绪** - 支持多种部署方式（systemd/Docker/PM2）
+### 🔍 域名监控
+- **批量域名监控** - 支持同时监控数百个域名
+- **高性能异步检查** - 使用 asyncio 和连接池技术  
+- **智能重试机制** - 仅对超时和连接错误进行重试
+- **自适应并发控制** - 根据系统资源自动调整并发数
+- **实时进度显示** - 显示检查进度和预计完成时间
+
+### 🌐 Cloudflare 集成
+- **多用户API Token管理** - 每个用户可管理多个Cloudflare账号
+- **域名批量操作** - 获取、导出和同步域名到监控系统
+- **权限验证** - Token有效性检查和权限验证
+- **多格式导出** - 支持txt、json、csv格式域名导出
+
+### 📱 Telegram Bot
+- **实时通知** - 域名状态变化即时通知
+- **远程控制** - 通过Telegram命令管理整个监控系统
+- **热配置更新** - 大部分配置支持在线修改，无需重启
+- **智能通知模式** - 支持完整模式和智能模式通知
+
+### 🛡️ 生产特性
+- **多种部署方式** - 支持systemd/Docker/PM2部署
+- **配置热重载** - 支持配置文件动态更新
+- **日志管理** - 轮转日志和可配置日志级别
+- **错误追踪** - 详细的错误分类和统计
 
 ## 🚀 快速开始
 
-### 1. 克隆项目
+### 环境要求
+- Python 3.8+
+- pip 和 venv（推荐）
+
+### 1. 项目初始化
 ```bash
+# 克隆项目
 git clone <repository_url>
 cd domain-monitor
-```
 
-### 2. 安装依赖
-```bash
-# Windows
-scripts\install_deps.bat
-
-# Linux/Mac
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-### 3. 配置服务
-复制配置示例并编辑：
+### 2. 配置设置
 ```bash
+# 复制配置模板
 cp config_example.json config.json
+cp cloudflare_tokens.example.json cloudflare_tokens.json  # 可选，系统会自动创建
 ```
 
-编辑 `config.json`，填入你的 Telegram Bot Token 和 Chat ID：
+### 3. 基础配置
+编辑 `config.json` 文件：
 ```json
 {
   "telegram": {
-    "bot_token": "YOUR_BOT_TOKEN",
-    "chat_id": "YOUR_CHAT_ID"
+    "bot_token": "YOUR_BOT_TOKEN",      // 从 @BotFather 获取
+    "chat_id": "-1001234567890",        // 群组ID（负数）
+    "admin_users": ["@your_username"]   // 管理员用户名列表
+  },
+  "domains": [
+    "https://example.com",
+    "https://test.com"
+  ],
+  "check": {
+    "interval_minutes": 30,
+    "max_concurrent": 10,
+    "timeout_seconds": 14
   }
 }
 ```
@@ -53,15 +80,15 @@ cp config_example.json config.json
 python src/main.py
 ```
 
-#### 生产环境
+#### 生产环境部署
 
-**Linux一键部署：**
+**Linux 一键部署：**
 ```bash
 chmod +x deploy.sh
 ./deploy.sh
 ```
 
-**Windows一键部署：**
+**Windows 一键部署：**
 ```batch
 deploy.bat
 ```
@@ -70,148 +97,291 @@ deploy.bat
 
 ```
 domain-monitor/
-├── src/                    # 源代码目录
-│   ├── main.py            # 主程序入口
-│   ├── domain_checker.py  # 域名检查核心模块
-│   ├── telegram_bot.py    # Telegram机器人模块
-│   ├── telegram_notifier.py # 通知发送模块
-│   └── config_manager.py  # 配置管理模块
-├── docs/                   # 文档
-│   ├── CONFIG_GUIDE.md    # 配置指南
-│   └── OPTIMIZATION.md    # 优化说明
-├── scripts/                # 工具脚本
-│   ├── install_deps.bat   # Windows依赖安装
-│   └── clean_logs.bat     # Windows日志清理
-├── deploy.sh              # Linux一键部署脚本
-├── deploy.bat             # Windows一键部署脚本
-├── config.json            # 配置文件（需创建）
-├── config_example.json    # 配置示例
-├── requirements.txt       # Python依赖
-└── README.md             # 本文档
+├── src/                           # 源代码目录
+│   ├── main.py                   # 主程序入口
+│   ├── domain_checker.py         # 域名检查核心引擎
+│   ├── telegram_bot.py           # Telegram机器人控制器
+│   ├── telegram_notifier.py      # 通知发送器
+│   ├── config_manager.py         # 配置管理器（支持热重载）
+│   ├── cloudflare_manager.py     # Cloudflare API管理器
+│   └── error_tracker.py          # 错误统计和追踪
+├── config.json                   # 主配置文件
+├── config_example.json           # 配置模板
+├── domains.json                  # 外部域名列表文件（可选）
+├── cloudflare_tokens.json        # Cloudflare Token存储
+├── cloudflare_tokens.example.json # Token配置示例
+├── deploy.sh                     # Linux部署脚本
+├── deploy.bat                    # Windows部署脚本
+├── requirements.txt              # Python依赖
+└── README.md                     # 项目文档
 ```
 
-## 🤖 Telegram 机器人命令
+## 🤖 Telegram Bot 命令参考
 
-### 基础命令
+### 基础监控命令
 - `/help` - 显示帮助信息
-- `/status` - 查看监控状态
+- `/status` - 查看当前监控状态
 - `/list` - 查看所有监控域名
+- `/check` - 立即执行一次检查
 
-### 域名管理（热更新）
-- `/add example.com` - 添加域名（支持批量）
-- `/remove example.com` - 删除域名（支持批量）
-- `/clear` - 清空所有域名
-- `/check` - 立即执行检查
+### 域名管理（支持热更新）
+- `/add example.com` - 添加域名到监控列表
+- `/remove example.com` - 从监控列表删除域名
+- `/clear` - 清空所有监控域名
 
-### 配置管理（热更新）
+### 配置管理（支持热更新）
 - `/config` - 显示当前配置
-- `/interval 10` - 设置检查间隔（分钟）
-- `/timeout 15` - 设置超时时间（秒）
-- `/retry 2` - 设置重试次数
-- `/concurrent 20` - 设置并发线程数（1-100）
-- `/threshold 3` - 设置失败阈值
-- `/cooldown 30` - 设置通知冷却时间（分钟）
-- `/recovery` - 切换恢复通知开关
-- `/allsuccess` - 切换全部正常时通知开关
-- `/autoadjust` - 切换自适应并发开关
-- `/reload` - 重新加载配置
+- `/interval 30` - 设置检查间隔（分钟，1-1440）
+- `/timeout 15` - 设置超时时间（秒，1-300）
+- `/retry 3` - 设置重试次数（0-10）
+- `/concurrent 20` - 设置并发数（1-100）
+- `/threshold 2` - 设置失败阈值
+- `/cooldown 60` - 设置通知冷却时间（分钟）
+- `/recovery on` - 开启恢复通知
+- `/allsuccess off` - 关闭全部成功通知
+- `/autoadjust on` - 开启自适应并发
+- `/reload` - 重新加载配置文件
 
-### 管理员命令（需重启）
-- `/admin list` - 查看管理员列表
+### Cloudflare 集成命令
+- `/cf` - 查看Cloudflare功能帮助
+- `/cftoken add 名称 TOKEN` - 添加API Token
+- `/cftoken remove 名称` - 删除API Token
+- `/cflist` - 查看我的Token列表
+- `/cfverify 名称` - 验证Token有效性
+- `/cfzones 名称` - 获取Token下的所有域名
+- `/cfexport 名称 [格式] [sync]` - 导出单个Token域名
+- `/cfexportall [格式] [sync]` - 导出所有Token域名（合并）
+- `/cfdomains 名称` - 同步域名到监控列表
+
+### 管理员命令（需重启生效）
+- `/admin list` - 查看管理员列表  
 - `/admin add @username` - 添加管理员
 - `/admin remove @username` - 移除管理员
 - `/stop` - 停止监控服务
 
-### 配置说明
-- **热更新配置**：修改后立即生效，无需重启服务
-- **需重启配置**：修改后需要重启服务才能生效
-- 大部分监控相关配置都支持热更新
+## ⚙️ 详细配置说明
 
-## ⚙️ 配置说明
+### 主配置文件 (config.json)
 
-### 核心配置
 ```json
 {
   "telegram": {
-    "bot_token": "Bot Token",
-    "chat_id": "群组ID",
-    "admin_users": ["@admin1", "@admin2"]
+    "bot_token": "YOUR_BOT_TOKEN",       // 必填：Telegram Bot Token
+    "chat_id": "-1001234567890",         // 必填：群组或用户ID
+    "admin_users": ["@admin1"]           // 管理员列表，空则所有人可用
   },
+  
   "check": {
-    "interval_minutes": 30,        // 检查间隔
-    "max_concurrent": 10,           // 最大并发数
-    "timeout_seconds": 14,          // 超时时间
-    "retry_count": 2,               // 重试次数
-    "auto_adjust_concurrent": true  // 自适应并发
+    "interval_minutes": 30,              // 检查间隔（1-1440分钟）
+    "max_concurrent": 10,                // 最大并发数（1-200）
+    "auto_adjust_concurrent": true,      // 自适应并发控制
+    "timeout_seconds": 14,               // 请求超时（1-300秒）
+    "retry_count": 2,                    // 重试次数（0-10）
+    "retry_delay_seconds": 5,            // 重试延迟
+    "batch_notify": false,               // 分批通知
+    "show_eta": true                     // 显示预计完成时间
   },
-  "domains": [
-    "example.com",
-    "test.com"
+  
+  "domains": [                           // 域名列表（或文件路径）
+    "https://example.com",
+    "https://test.com"
   ],
+  // 或使用外部文件：
+  // "domains": "domains.json",
+  
   "notification": {
-    "level": "smart",              // 通知级别：smart（智能模式）、full（完整模式）
-    "notify_on_recovery": true,    // 恢复时通知
-    "failure_threshold": 1,        // 失败阈值
-    "cooldown_minutes": 20         // 冷却时间
+    "level": "smart",                    // 通知模式：smart/full
+    "notify_on_recovery": true,          // 恢复时通知
+    "failure_threshold": 2,              // 失败阈值
+    "cooldown_minutes": 60,              // 冷却时间
+    "quiet_on_success": false            // 成功时静默
+  },
+  
+  "logging": {
+    "level": "INFO",                     // 日志级别
+    "file": "domain_monitor.log",        // 日志文件
+    "max_size_mb": 10,                   // 最大文件大小
+    "backup_count": 5                    // 备份文件数
+  },
+  
+  "history": {
+    "enabled": true,                     // 历史记录
+    "retention_days": 30,                // 保留天数
+    "max_records": 10000                 // 最大记录数
+  },
+  
+  "daily_report": {
+    "enabled": false,                    // 每日报告
+    "time": "09:00"                      // 发送时间
+  },
+  
+  "cloudflare": {
+    "export": {
+      "output_dir": "exports",           // 导出文件目录
+      "default_format": "json",          // 默认导出格式：txt, json, csv
+      "include_timestamp": false,        // 文件名是否包含时间戳
+      "single_file_name": "cf_domains_{token_name}.{format}",  // 单个账号导出文件名模板
+      "merged_file_name": "cf_all_domains.{format}",           // 合并导出文件名模板
+      "auto_create_dir": true,           // 自动创建导出目录
+      "sync_delete": true                // 同步删除：导出时删除CF中已不存在的域名
+    }
   }
 }
 ```
 
-详细配置说明请参见 [配置指南](docs/CONFIG_GUIDE.md)
+### 外部域名文件 (domains.json)
+```json
+[
+  "https://example1.com",
+  "https://example2.com",  
+  "https://api.example.com"
+]
+```
 
-## 📊 性能优化
+### Cloudflare Token配置
+```json
+{
+  "users": {
+    "123456789": {                       // Telegram用户ID
+      "tokens": [
+        {
+          "name": "主账号",              // 自定义名称
+          "token": "your_token_here",    // API Token
+          "permissions": ["Zone:Read", "DNS:Read"],
+          "created_at": "2024-01-01T00:00:00",
+          "status": "active"
+        }
+      ]
+    }
+  },
+  "global_tokens": []                    // 全局Token（管理员）
+}
+```
 
-- **连接池复用** - 减少连接建立开销
-- **HTTP/2支持** - 提升传输效率（需安装h2）
-- **智能重试** - 仅重试可恢复的错误
-- **批量处理** - 分批检查避免资源耗尽
-- **自适应并发** - 根据CPU和内存动态调整
+## 🌐 Cloudflare 集成使用指南
 
-### 推荐配置
-- **小型部署** (<100域名): 1核1G内存
-- **中型部署** (100-500域名): 2核2G内存
-- **大型部署** (>500域名): 4核4G内存
+### API Token 获取方法
+1. 登录 [Cloudflare Dashboard](https://dash.cloudflare.com/)
+2. 进入 "My Profile" → "API Tokens"
+3. 点击 "Create Token"
+4. 选择 "Custom token" 模板
+5. 设置权限：
+   - **Account**: Zone:Read
+   - **Zone**: Zone:Read, DNS:Read
+6. 可选择特定域名或所有域名
+7. 创建并复制Token
 
-## 🔧 故障排查
+### 使用流程
 
-### 常见问题
+#### 1. 添加Token
+```
+/cftoken add 主账号 your_cloudflare_api_token_here
+```
 
-1. **Telegram消息发送失败**
-   - 检查 Bot Token 是否正确
-   - 确认 Chat ID 格式正确（群组ID应为负数）
-   - 验证机器人已加入群组并有发送权限
+#### 2. 验证Token
+```
+/cfverify 主账号
+```
 
-2. **域名检查超时**
-   - 增加 timeout_seconds 配置
-   - 减少 max_concurrent 并发数
-   - 检查网络连接
+#### 3. 查看域名
+```
+/cfzones 主账号
+```
 
-3. **内存占用过高**
-   - 启用 auto_adjust_concurrent
-   - 减少 max_concurrent 值
-   - 检查域名列表是否过大
+#### 4. 导出域名
+```
+# 导出单个Token域名（使用配置默认格式）
+/cfexport 主账号
 
-## 📈 监控消息示例
+# 导出为JSON格式并启用同步删除
+/cfexport 主账号 json sync
 
-### 通知级别说明
+# 导出所有Token域名到合并文件
+/cfexportall json sync
+```
 
-#### Smart模式（智能通知）
+#### 5. 同步到监控
+```
+/cfdomains 主账号
+```
+
+### 导出功能详解
+
+#### 单个Token导出 (`/cfexport`)
+- **基本用法**: `/cfexport 主账号`
+- **指定格式**: `/cfexport 主账号 json`
+- **启用同步删除**: `/cfexport 主账号 json sync`
+- **支持格式**: txt, json, csv
+- **文件路径**: `exports/cf_domains_主账号.json`
+
+#### 合并导出 (`/cfexportall`)
+- **基本用法**: `/cfexportall`
+- **指定格式**: `/cfexportall txt`
+- **启用同步删除**: `/cfexportall json sync`
+- **功能**: 合并所有Token的域名到一个文件
+- **文件路径**: `exports/cf_all_domains.json`
+
+#### 同步删除功能
+- **作用**: 自动删除监控列表中CF已不存在的域名
+- **触发**: 添加 `sync` 参数到导出命令
+- **安全**: 只删除不在CF中但在监控列表中的域名
+
+### 多账号管理示例
+```bash
+# 添加多个账号
+/cftoken add 账号A token_a_here
+/cftoken add 账号B token_b_here
+
+# 查看所有Token
+/cflist
+
+# 分别导出域名
+/cfexport 账号A json
+/cfexport 账号B csv
+
+# 合并导出所有账号域名
+/cfexportall json sync
+
+# 选择主要账号同步到监控
+/cfdomains 账号A
+```
+
+## 📊 通知系统说明
+
+### Smart模式（智能通知）- 推荐
 - **只通知变化**：仅在有新错误或恢复时发送通知
 - **简洁明了**：重点关注状态变化，减少信息噪音
 - **适合场景**：长期稳定监控，关注问题变化
 
-#### Full模式（完整通知）
+#### 示例通知
+```
+🔔 状态变化通知
+
+🆕 新出现问题 (2个):
+• example1.com - Cloudflare错误 (522连接超时)  
+• example2.com - 网关错误 (502坏网关)
+
+✅ 已恢复正常 (1个):
+• example3.com
+
+📊 当前总体:
+• 监控总数: 68 • 在线正常: 66 • 异常域名: 2
+
+⏰ 2024-01-01 12:00:00
+```
+
+### Full模式（完整通知）
 - **每次都通知**：每次检查完成后都发送详细结果
 - **完整信息**：显示所有错误的详细分类
 - **适合场景**：调试阶段，需要详细了解每次检查结果
 
-### 完整模式通知示例
+#### 示例通知
 ```
 ⚠️ 检查结果
 
 📊 整体状态
 🔍 检查域名: 68 个
-✅ 正常在线: 65 个
+✅ 正常在线: 65 个  
 ❌ 异常域名: 3 个
 
 **⚠️ Cloudflare错误 (522连接超时) (1个):**
@@ -226,47 +396,184 @@ domain-monitor/
 ⏰ 2024-01-01 12:00:00
 ```
 
-### 智能模式通知示例
+## 🚀 性能优化建议
+
+### 系统资源配置
+- **小型部署** (<100域名): 1核1G内存，并发数10-20
+- **中型部署** (100-500域名): 2核2G内存，并发数30-50  
+- **大型部署** (>500域名): 4核4G内存，并发数50-100
+
+### 优化特性
+- **连接池复用** - 减少连接建立开销
+- **HTTP/2支持** - 提升传输效率（安装h2包）
+- **智能重试** - 仅重试可恢复的错误
+- **批量处理** - 分批检查避免资源耗尽
+- **自适应并发** - 根据CPU和内存动态调整
+
+### 配置建议
+```json
+{
+  "check": {
+    "max_concurrent": 20,              // 根据服务器性能调整
+    "auto_adjust_concurrent": true,    // 启用自适应
+    "timeout_seconds": 15,             // 适中的超时时间
+    "retry_count": 2,                  // 适度重试
+    "batch_notify": false              // 减少通知频率
+  },
+  "notification": {
+    "level": "smart",                  // 使用智能模式
+    "failure_threshold": 2,            // 避免误报
+    "cooldown_minutes": 60             // 合理冷却时间
+  }
+}
 ```
-🔔 状态变化通知
 
-🆕 新出现问题 (2个):
-• example1.com - Cloudflare错误 (522连接超时)
-• example2.com - 网关错误 (502坏网关)
+## 🔧 故障排查指南
 
-✅ 已恢复正常 (1个):
-• example3.com
+### Telegram相关问题
 
-📊 当前总体:
-• 监控总数: 68
-• 在线正常: 66
-• 异常域名: 2
+**1. 消息发送失败**
+- 检查Bot Token是否正确（从@BotFather获取）
+- 确认Chat ID格式正确（群组ID为负数）
+- 验证机器人已加入群组并具有发送权限
 
-⏰ 2024-01-01 12:00:00
-```
+**2. 命令无响应**  
+- 检查机器人是否在线
+- 确认用户在admin_users列表中（如果设置了）
+- 查看日志文件检查错误信息
 
-## 📝 开发说明
+### 域名检查问题
 
-### 环境要求
-- Python 3.8+
-- pip
-- venv（推荐）
+**1. 检查超时频繁**
+- 增加`timeout_seconds`配置（建议15-30秒）
+- 减少`max_concurrent`并发数
+- 检查网络连接稳定性
+- 启用`auto_adjust_concurrent`自适应功能
+
+**2. 内存占用过高**
+- 启用`auto_adjust_concurrent`自适应并发
+- 减少`max_concurrent`值
+- 检查域名列表是否过大（建议<1000个）
+- 定期清理日志文件
+
+### Cloudflare集成问题
+
+**1. Token验证失败**
+- 检查Token是否正确复制（不含空格）
+- 确认Token权限设置（Zone:Read, DNS:Read）
+- 验证Token是否过期或被撤销
+
+**2. 域名获取失败**
+- 检查网络连接到Cloudflare API
+- 确认Token有对应域名的访问权限
+- 检查Cloudflare API服务状态
+
+### 系统运行问题
+
+**1. 服务启动失败**
+- 检查Python版本（需要3.8+）
+- 确认所有依赖已正确安装
+- 检查配置文件格式（JSON语法）
+- 查看详细错误日志
+
+**2. 配置热重载失败**
+- 检查配置文件JSON格式
+- 确认文件权限可读写
+- 重启服务以应用所有更改
+
+## 📚 学习路径
+
+### 新手入门
+1. **环境准备** - 安装Python和依赖包
+2. **基础配置** - 设置Telegram Bot和基本监控
+3. **运行测试** - 添加少量域名进行测试
+4. **熟悉命令** - 学习基本的Telegram命令操作
+
+### 进阶使用  
+1. **性能优化** - 调整并发数和超时配置
+2. **通知优化** - 配置智能通知和冷却时间
+3. **Cloudflare集成** - 连接CF账号批量管理域名
+4. **生产部署** - 使用systemd或Docker部署
+
+### 专家级配置
+1. **大规模监控** - 优化大量域名的监控性能
+2. **多账号管理** - 管理多个CF账号和Token
+3. **自定义开发** - 基于API进行二次开发
+4. **监控报警** - 集成其他监控系统
+
+## 💡 最佳实践
+
+### 监控配置
+- 使用合理的检查间隔（推荐30分钟）
+- 启用自适应并发控制
+- 设置适当的失败阈值避免误报
+- 使用智能通知模式减少噪音
+
+### 安全建议
+- 定期轮换Cloudflare API Token
+- 限制Telegram管理员用户
+- 使用最小权限原则配置Token
+- 定期检查和清理不用的配置
+
+### 运维建议  
+- 定期检查日志文件大小
+- 监控系统资源使用情况
+- 备份重要配置文件
+- 测试灾难恢复流程
+
+## 📄 技术架构
 
 ### 核心模块
-- `DomainMonitor` - 主程序协调器
-- `DomainChecker` - 域名检测引擎
-- `TelegramBot` - 机器人命令处理
-- `TelegramNotifier` - 通知发送器
-- `ConfigManager` - 配置管理器
+- **DomainMonitor** - 主程序协调器，管理整个监控流程
+- **DomainChecker** - 异步域名检测引擎，负责并发检查
+- **TelegramBot** - 机器人命令处理器，处理用户交互
+- **TelegramNotifier** - 通知发送器，智能通知管理
+- **ConfigManager** - 配置管理器，支持热重载功能
+- **CloudflareManager** - CF API管理器，Token和域名管理
+- **ErrorTracker** - 错误统计追踪器，分析失败模式
+
+### 技术特点
+- **异步架构** - 基于asyncio的高性能异步处理
+- **连接池管理** - HTTP连接复用提升效率  
+- **智能重试** - 区分错误类型进行有选择重试
+- **自适应控制** - 根据系统负载动态调整并发
+- **热配置更新** - 无需重启即可更新大部分配置
+- **模块化设计** - 松耦合的模块化架构便于扩展
+
+## 📝 更新日志
+
+### v1.1.0 - Cloudflare集成版本
+- ✅ 集成Cloudflare API功能
+- ✅ 多用户Token管理系统
+- ✅ 域名批量操作（获取/导出/同步）
+- ✅ 外部域名文件支持
+- ✅ 扩展Telegram命令集
+
+### v1.0.0 - 基础监控版本
+- ✅ 异步域名批量监控
+- ✅ Telegram Bot控制
+- ✅ 智能通知系统
+- ✅ 配置热重载
+- ✅ 生产部署支持
 
 ## 📄 许可证
 
-MIT License
+MIT License - 详见 LICENSE 文件
 
-## 🤝 贡献
+## 🤝 贡献指南
 
-欢迎提交 Issue 和 Pull Request！
+欢迎贡献代码！提交PR前请确保：
+- 代码符合项目风格
+- 添加必要的测试
+- 更新相关文档
+- 通过所有检查
 
-## 📧 支持
+## 📧 支持与反馈
 
-如有问题或建议，请提交 Issue。
+- **Issues**: 使用GitHub Issues报告问题
+- **讨论**: GitHub Discussions进行技术讨论  
+- **文档**: 查看本README获取详细信息
+
+---
+
+**快速开始**：复制`config_example.json`到`config.json`，填入Bot Token和Chat ID，运行`python src/main.py`开始使用！

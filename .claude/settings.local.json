@@ -4,7 +4,8 @@
       "Bash(dir:*)",
       "Bash(del:*)",
       "Bash(python:*)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(rm:*)"
     ],
     "deny": [],
     "ask": []
