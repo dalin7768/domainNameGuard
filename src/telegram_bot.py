@@ -333,7 +333,7 @@ class TelegramBot:
 🌟 **基础命令**:
 `/help` - 显示帮助和配置信息
 `/status` - 查看详细监控状态
-`/check` - 立即执行域名检查
+`/check` - 立即执行域名检查（防重复执行保护）
 `/stopcheck` - 停止当前正在进行的检查
 
 📝 **域名管理**:
@@ -1242,7 +1242,7 @@ class TelegramBot:
 `/cfzones 名称` - 获取Token下的所有域名
 `/cfexport 名称 [格式] [sync]` - 导出单个Token域名到文件
 `/cfexportall [格式] [sync]` - 导出所有Token域名到文件（合并）
-`/cfsync [名称] [模式]` - 同步CF域名到监控配置
+`/cfsync [名称] [模式]` - 同步CF域名到监控配置（低噪音通知）
 
 🔄 **cfsync 同步模式详解**:
 • `replace` - 完全替换现有监控域名（指定Token则用该Token，不指定则用所有Token）
@@ -1271,7 +1271,9 @@ class TelegramBot:
 `/cfsync 主账号 replace` - 用主账号域名替换监控列表
 `/cfsync replace` - 用所有Token域名替换监控列表
 `/cfsync 主账号 merge` - 合并主账号域名到现有监控列表
-`/cfsync merge` - 合并所有Token域名到监控列表"""
+`/cfsync merge` - 合并所有Token域名到监控列表
+
+⚠️ **注意**: cfsync操作采用低噪音通知策略，只在完成或出错时发送通知"""
         
         await self.send_message(help_text, reply_to=msg_id)
     

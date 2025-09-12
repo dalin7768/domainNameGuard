@@ -509,20 +509,6 @@ class ConfigManager:
                 return False, "保存配置失败"
     
     # 通知配置管理
-    def set_failure_threshold(self, threshold: int) -> tuple[bool, str]:
-        """设置失败阈值"""
-        with self.lock:
-            if threshold < 1:
-                return False, "失败阈值不能小于 1"
-            if threshold > 100:
-                return False, "失败阈值不能大于 100"
-            
-            self.config['notification']['failure_threshold'] = threshold
-            
-            if self.save_config():
-                return True, f"失败阈值已设置为 {threshold}"
-            else:
-                return False, "保存配置失败"
     
     def set_cooldown(self, minutes: int) -> tuple[bool, str]:
         """设置冷却时间"""
@@ -695,7 +681,6 @@ class ConfigManager:
             retry = self.config['check']['retry_count']
             concurrent = self.config['check'].get('max_concurrent', 10)
             auto_adjust = "开启" if self.config['check'].get('auto_adjust_concurrent', True) else "关闭"
-            threshold = self.config['notification']['failure_threshold']
             cooldown = self.config['notification']['cooldown_minutes']
             recovery = "开启" if self.config['notification']['notify_on_recovery'] else "关闭"
             all_success = "开启" if self.config['notification'].get('notify_on_all_success', False) else "关闭"
@@ -709,7 +694,6 @@ class ConfigManager:
 🔁 **重试次数**: {retry} 次
 ⚡ **并发线程**: {concurrent} 个
 🎯 **自适应并发**: {auto_adjust}
-⚠️ **失败阈值**: {threshold} 次
 ❄️ **冷却时间**: {cooldown} 分钟
 ✅ **恢复通知**: {recovery}
 📢 **全正常通知**: {all_success}

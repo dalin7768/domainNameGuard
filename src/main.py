@@ -311,8 +311,7 @@ class DomainMonitor:
                     f"└ 预计用时: {eta_minutes}分{eta_seconds}秒\n\n"
                     f"🔔 **通知模式**\n"
                     f"├ 当前级别: {level_desc.get(notify_level, notify_level)}\n"
-                    f"├ 恢复通知: {'开启' if notify_on_recovery else '关闭'}\n"
-                    f"└ 错误阈值: {failure_threshold} 次\n\n"
+                    f"└ 恢复通知: {'开启' if notify_on_recovery else '关闭'}\n\n"
                     f"正在检查中，请稍候..."
                 )
             
@@ -1041,7 +1040,6 @@ class DomainMonitor:
             f"🔔 **通知模式**\n"
             f"├ 当前级别: {level_desc.get(notify_level, notify_level)}\n"
             f"├ 恢复通知: {'开启' if notify_on_recovery else '关闭'}\n"
-            f"├ 错误阈值: 连续 {failure_threshold} 次\n"
             f"└ 每日统计: {daily_report_time if daily_report_enabled else '关闭'}\n\n"
             f"⏱️ **启动首次检查**\n"
             f"├ 待检域名: {domain_count} 个\n"
