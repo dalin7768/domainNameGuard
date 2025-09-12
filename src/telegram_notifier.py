@@ -10,54 +10,22 @@ from collections import defaultdict
 class TelegramNotifier:
     """Telegram 通知器类"""
     
-    def __init__(self, bot_token: str, chat_id: str, cooldown_minutes: int = 60):
+    def __init__(self, bot_token: str, chat_id: str):
         """
         初始化 Telegram 通知器
         
         Args:
             bot_token: Telegram Bot Token
             chat_id: 群组或频道 ID
-            cooldown_minutes: 通知冷却时间（分钟）
         """
         self.bot_token = bot_token
         self.chat_id = chat_id
-        self.cooldown_minutes = cooldown_minutes
         self.logger = logging.getLogger(__name__)
         
-        # 记录每个域名的上次通知时间，用于冷却控制
-        self.last_notification_time: Dict[str, datetime] = {}
-        
-        # 记录每个域名的连续失败次数
-        self.failure_count: Dict[str, int] = {}
         
         # API 基础 URL
         self.api_base_url = f"https://api.telegram.org/bot{bot_token}"
     
-    def _should_notify(self, url: str, failure_threshold: int = 2) -> bool:
-        """
-        判断是否应该发送通知
-        
-        Args:
-            url: 域名 URL
-            failure_threshold: 失败阈值
-            
-        Returns:
-            bool: 是否应该发送通知
-        """
-        # 检查是否在冷却期内
-        if url in self.last_notification_time:
-            time_since_last = datetime.now() - self.last_notification_time[url]
-            if time_since_last < timedelta(minutes=self.cooldown_minutes):
-                remaining_minutes = self.cooldown_minutes - int(time_since_last.total_seconds() / 60)
-                self.logger.debug(f"域名 {url} 在冷却期内，还需等待 {remaining_minutes} 分钟")
-                return False
-        
-        # 检查连续失败次数是否达到阈值
-        if self.failure_count.get(url, 0) < failure_threshold:
-            self.logger.debug(f"域名 {url} 失败次数 {self.failure_count.get(url, 0)} 未达到阈值 {failure_threshold}")
-            return False
-        
-        return True
     
     def _format_error_message(self, result: CheckResult) -> str:
         """
@@ -143,6 +111,9 @@ class TelegramNotifier:
         Returns:
             bool: 是否发送成功
         """
+        self.logger.info(f"准备发送Telegram消息，长度: {len(message)} 字符")
+        self.logger.debug(f"消息内容预览: {message[:200]}...")
+        
         # Telegram 消息长度限制
         MAX_MESSAGE_LENGTH = 4096
         
@@ -154,38 +125,48 @@ class TelegramNotifier:
             self.logger.warning(f"消息过长，已截断至 {MAX_MESSAGE_LENGTH} 字符")
         
         try:
+            self.logger.info(f"发送HTTP请求到: {self.api_base_url}/sendMessage")
+            self.logger.info(f"chat_id: {self.chat_id}, parse_mode: {parse_mode}")
+            
             async with httpx.AsyncClient(timeout=10) as client:
+                payload = {
+                    "chat_id": self.chat_id,
+                    "text": message,
+                    "parse_mode": parse_mode,
+                    "disable_web_page_preview": True
+                }
+                
                 response = await client.post(
                     f"{self.api_base_url}/sendMessage",
-                    json={
-                        "chat_id": self.chat_id,
-                        "text": message,
-                        "parse_mode": parse_mode,
-                        "disable_web_page_preview": True
-                    }
+                    json=payload
                 )
+                
+                self.logger.info(f"收到HTTP响应，状态码: {response.status_code}")
                 
                 if response.status_code == 200:
                     data = response.json()
+                    self.logger.info(f"Telegram API响应: {data}")
                     if data.get("ok"):
                         self.logger.info("Telegram 消息发送成功")
                         return True
                     else:
                         self.logger.error(f"Telegram API 返回错误：{data.get('description')}")
+                        self.logger.error(f"完整响应: {data}")
                         return False
                 else:
+                    response_text = response.text
                     self.logger.error(f"Telegram 消息发送失败，状态码：{response.status_code}")
+                    self.logger.error(f"响应内容: {response_text}")
                     return False
                     
         except Exception as e:
             self.logger.error(f"发送 Telegram 消息时发生错误：{str(e)}")
+            import traceback
+            self.logger.error(f"错误堆栈: {traceback.format_exc()}")
             return False
     
     async def notify_failures(self, 
                              results: List[CheckResult], 
-                             failure_threshold: int = 2,
-                             notify_recovery: bool = True,
-                             notify_all_success: bool = False,
                              quiet_on_success: bool = False,
                              is_manual: bool = False,
                              next_run_time: Optional[datetime] = None,
@@ -197,21 +178,12 @@ class TelegramNotifier:
         
         Args:
             results: 检查结果列表
-            failure_threshold: 失败阈值
-            notify_recovery: 是否通知恢复
-            notify_all_success: 是否在全部正常时通知
             quiet_on_success: 定时检查时，如果全部成功是否静默（不发送通知）
             is_manual: 是否为手动触发的检查
             new_errors: 新增的错误（智能模式）
             recovered: 已恢复的域名（智能模式）
             persistent_errors: 持续错误（智能模式）
         """
-        # 更新失败计数（用于内部跟踪）
-        for result in results:
-            if result.is_success:
-                self.failure_count[result.url] = 0
-            else:
-                self.failure_count[result.url] = self.failure_count.get(result.url, 0) + 1
         
         # 如果是智能模式并提供了详细信息
         if new_errors is not None or recovered is not None:
@@ -224,16 +196,15 @@ class TelegramNotifier:
             )
         else:
             # 发送传统的检查完成通知
-            await self._send_check_summary(results, notify_all_success, quiet_on_success, is_manual, next_run_time=next_run_time)
+            await self._send_check_summary(results, quiet_on_success, is_manual, next_run_time=next_run_time)
     
-    async def _send_check_summary(self, results: List[CheckResult], notify_all_success: bool, 
+    async def _send_check_summary(self, results: List[CheckResult],
                                   quiet_on_success: bool = False, is_manual: bool = False, 
                                   next_run_time: Optional[datetime] = None) -> None:
         """发送检查汇总通知（优化版，按错误类型分组）
         
         Args:
             results: 检查结果列表  
-            notify_all_success: 是否在全部正常时发送通知
             quiet_on_success: 定时检查时，如果全部成功是否静默（不发送通知）
             is_manual: 是否为手动触发的检查
         """
@@ -246,19 +217,19 @@ class TelegramNotifier:
         failed_count = total_count - success_count
         
         # 添加调试日志
-        self.logger.info(f"检查汇总 - is_manual: {is_manual}, total: {total_count}, success: {success_count}, failed: {failed_count}")
+        self.logger.info(f"检查汇总 - is_manual: {is_manual}, total: {total_count}, success: {success_count}, failed: {failed_count}, quiet_on_success: {quiet_on_success}")
         
         # 决定是否发送通知的逻辑：
         # 1. 手动检查：总是发送通知
         # 2. 定时检查且有失败：总是发送通知
-        # 3. 定时检查且全部成功：根据quiet_on_success和notify_all_success决定
+        # 3. 定时检查且全部成功：根据quiet_on_success决定
         if not is_manual and failed_count == 0:
             if quiet_on_success:
                 self.logger.info(f"定时检查完成：{total_count} 个域名全部正常，静默模式已启用，不发送通知")
                 return
-            elif not notify_all_success:
-                self.logger.info(f"定时检查完成：{total_count} 个域名全部正常，未启用全部成功通知")
-                return
+            else:
+                self.logger.info(f"定时检查完成：{total_count} 个域名全部正常，将发送成功通知")
+            # 定时检查全部正常时也发送通知（智能模式会在上级控制）
         
         # 手动检查时，总是发送通知
         if is_manual:
@@ -267,6 +238,7 @@ class TelegramNotifier:
         # 构建汇总消息
         if failed_count == 0:
             # 全部正常
+            self.logger.info("构建全部正常的成功消息")
             message = f"✅ **全部正常**\n\n"
             message += f"🔍 检查域名: {total_count} 个\n"
             message += f"🌟 状态: 全部在线\n"
@@ -282,6 +254,14 @@ class TelegramNotifier:
                     message += f"📅 具体时间: {next_run_time.strftime('%H:%M:%S')}"
                 else:
                     message += f"⏰ 下次检查将立即开始"
+            
+            # 发送全部成功的消息
+            self.logger.info("准备发送全部成功的通知消息")
+            success = await self.send_message(message)
+            if success:
+                self.logger.info(f"全部成功通知已发送 - 共 {total_count} 个域名全部正常")
+            else:
+                self.logger.error("全部成功通知发送失败")
         else:
             # 有异常域名，按更细致的错误类型分组
             error_groups = defaultdict(list)
@@ -469,68 +449,98 @@ class TelegramNotifier:
         # 构建消息
         message = "🔔 **状态变化通知**\n\n"
         
-        # 新增错误
+        # 新增错误（按类型分组显示）
         if new_errors:
             message += f"🆕 **新出现问题 ({len(new_errors)}个)**:\n"
-            for error in new_errors:  # 显示所有新错误
-                # 为HTTP错误提供具体的状态码描述
+            
+            # 按错误类型分组
+            error_groups = defaultdict(list)
+            for error in new_errors:
+                # 对HTTP错误进行更细致的分类，与其他模式保持一致
                 if error.status == CheckStatus.HTTP_ERROR and error.status_code:
-                    if error.status_code == 520:
-                        status_desc = "Cloudflare错误 (520未知错误)"
-                    elif error.status_code == 521:
-                        status_desc = "Cloudflare错误 (521服务器离线)"
-                    elif error.status_code == 522:
-                        status_desc = "Cloudflare错误 (522连接超时)"
-                    elif error.status_code == 523:
-                        status_desc = "Cloudflare错误 (523源站不可达)"
-                    elif error.status_code == 524:
-                        status_desc = "Cloudflare错误 (524超时)"
-                    elif error.status_code == 525:
-                        status_desc = "Cloudflare错误 (525SSL握手失败)"
-                    elif error.status_code == 526:
-                        status_desc = "Cloudflare错误 (526SSL证书无效)"
-                    elif error.status_code == 502:
-                        status_desc = "网关错误 (502坏网关)"
-                    elif error.status_code == 503:
-                        status_desc = "网关错误 (503服务暂不可用)"
-                    elif error.status_code == 504:
-                        status_desc = "网关错误 (504网关超时)"
-                    elif error.status_code == 500:
-                        status_desc = "服务器内部错误 (500)"
-                    elif error.status_code == 403:
-                        status_desc = "访问被拒绝 (403禁止访问)"
-                    elif error.status_code == 401:
-                        status_desc = "访问被拒绝 (401未授权)"
-                    elif error.status_code == 451:
-                        status_desc = "访问被拒绝 (451法律原因)"
-                    elif error.status_code == 404:
-                        status_desc = "页面不存在 (404)"
-                    elif error.status_code == 400:
-                        status_desc = "请求错误 (400错误请求)"
-                    elif error.status_code == 429:
-                        status_desc = "请求错误 (429请求过多)"
-                    else:
-                        status_desc = f"HTTP错误 ({error.status_code})"
+                    error_groups[f'http_{error.status_code}'].append(error)
                 else:
-                    # 非HTTP错误的描述
-                    status_desc = {
-                        'DNS_ERROR': 'DNS异常',
-                        'CONNECTION_ERROR': '连接失败',
-                        'TIMEOUT': '响应超时',
-                        'HTTP_ERROR': 'HTTP错误',
-                        'SSL_ERROR': 'SSL问题',
-                        'WEBSOCKET_ERROR': 'WebSocket异常',
-                        'PHISHING_WARNING': '钓鱼警告',
-                        'SECURITY_WARNING': '安全警告'
-                    }.get(error.status.value, error.status.value)
-                message += f"• {error.domain_name} - {status_desc}\n"
-            # 显示所有新错误，不省略
-            message += "\n"
+                    error_groups[error.status].append(error)
+            
+            # HTTP错误的处理（与其他模式保持一致）
+            http_error_names = {
+                'http_520': ("⚠️", "Cloudflare错误 (520未知错误)"),
+                'http_521': ("⚠️", "Cloudflare错误 (521服务器离线)"),
+                'http_522': ("⚠️", "Cloudflare错误 (522连接超时)"),
+                'http_523': ("⚠️", "Cloudflare错误 (523源站不可达)"),
+                'http_524': ("⚠️", "Cloudflare错误 (524超时)"),
+                'http_525': ("⚠️", "Cloudflare错误 (525SSL握手失败)"),
+                'http_526': ("⚠️", "Cloudflare错误 (526SSL证书无效)"),
+                'http_502': ("🚪", "网关错误 (502坏网关)"),
+                'http_503': ("🚪", "网关错误 (503服务暂不可用)"),
+                'http_504': ("🚪", "网关错误 (504网关超时)"),
+                'http_500': ("💥", "服务器内部错误 (500)"),
+                'http_403': ("🚫", "访问被拒绝 (403禁止访问)"),
+                'http_401': ("🚫", "访问被拒绝 (401未授权)"),
+                'http_451': ("🚫", "访问被拒绝 (451法律原因)"),
+                'http_404': ("🔎", "页面不存在 (404)"),
+                'http_400': ("⚠️", "请求错误 (400错误请求)"),
+                'http_429': ("⚠️", "请求错误 (429请求过多)")
+            }
+            
+            # 非HTTP错误的处理
+            error_names = {
+                CheckStatus.DNS_ERROR: ("🔍", "DNS解析失败"),
+                CheckStatus.CONNECTION_ERROR: ("🔌", "无法建立连接"), 
+                CheckStatus.TIMEOUT: ("⏱️", "访问超时"),
+                CheckStatus.SSL_ERROR: ("🔒", "SSL证书问题"),
+                CheckStatus.WEBSOCKET_ERROR: ("🌐", "WebSocket连接失败"),
+                CheckStatus.PHISHING_WARNING: ("🎣", "钓鱼网站警告"),
+                CheckStatus.SECURITY_WARNING: ("🚨", "安全风险警告"),
+                CheckStatus.UNKNOWN_ERROR: ("❓", "未知错误"),
+            }
+            
+            # 定义显示顺序（与其他模式保持一致）
+            display_order = [
+                # Cloudflare错误
+                'http_520', 'http_521', 'http_522', 'http_523', 'http_524', 'http_525', 'http_526',
+                # 网关错误
+                'http_502', 'http_503', 'http_504',
+                # 其他HTTP错误
+                'http_500', 'http_403', 'http_401', 'http_451', 'http_404', 'http_400', 'http_429',
+                # 非HTTP错误
+                CheckStatus.DNS_ERROR, CheckStatus.CONNECTION_ERROR, 
+                CheckStatus.TIMEOUT, CheckStatus.SSL_ERROR,
+                CheckStatus.WEBSOCKET_ERROR, CheckStatus.PHISHING_WARNING,
+                CheckStatus.SECURITY_WARNING, CheckStatus.UNKNOWN_ERROR
+            ]
+            
+            # 处理所有错误组
+            all_statuses = list(display_order) + [s for s in error_groups.keys() if s not in display_order]
+            
+            # 按类型显示错误（与其他模式格式一致）
+            for status in all_statuses:
+                if status not in error_groups:
+                    continue
+                    
+                errors = error_groups[status]
+                if not errors:
+                    continue
+                
+                # 获取错误名称
+                if isinstance(status, str) and status.startswith('http_'):
+                    emoji, display_name = http_error_names.get(status, ("❌", f"HTTP错误 ({status[5:]})"))
+                else:
+                    if isinstance(status, CheckStatus):
+                        status_value = status.value
+                    else:
+                        status_value = status
+                    emoji, display_name = error_names.get(status, ("⚠️", status_value.upper()))
+                
+                message += f"**{emoji} {display_name} ({len(errors)}个):**\n"
+                for error in errors:
+                    message += f"  • {error.domain_name}\n"
+                message += "\n"
         
-        # 已恢复
+        # 已恢复（简单列表即可）
         if recovered:
             message += f"✅ **已恢复正常 ({len(recovered)}个)**:\n"
-            for rec in recovered:  # 显示所有恢复的域名
+            for rec in recovered:
                 message += f"• {rec.domain_name}\n"
             message += "\n"
         

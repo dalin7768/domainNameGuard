@@ -20,9 +20,6 @@
 
   "notification": {
     "level": "smart",
-    "notify_on_recovery": true,
-    "failure_threshold": 2,
-    "cooldown_minutes": 60,
     "quiet_on_success": false
   },
 

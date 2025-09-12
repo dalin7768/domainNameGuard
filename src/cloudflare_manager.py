@@ -50,7 +50,7 @@ class CloudflareTokenManager:
             try:
                 # 确保父目录存在
                 dir_path = os.path.dirname(self.tokens_file)
-                if dir_path:  # 只有当目录路径不为空时才创建
+                if dir_path and not os.path.exists(dir_path):
                     os.makedirs(dir_path, exist_ok=True)
                 with open(self.tokens_file, 'w', encoding='utf-8') as f:
                     json.dump(default_data, f, indent=2, ensure_ascii=False)

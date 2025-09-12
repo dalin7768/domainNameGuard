@@ -196,7 +196,6 @@ domain-monitor/
   
   "notification": {
     "level": "smart",                    // 通知模式：smart/full
-    "notify_on_recovery": true,          // 恢复时通知
     "failure_threshold": 2,              // 失败阈值
     "cooldown_minutes": 60,              // 冷却时间
     "quiet_on_success": false            // 成功时静默

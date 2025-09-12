@@ -13,7 +13,7 @@ ENV/
 config.json
 cloudflare_tokens.json
 domains.json
-
+error_history.json
 # 日志文件
 *.log
 logs/

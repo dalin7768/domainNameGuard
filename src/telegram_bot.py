@@ -36,6 +36,7 @@ class TelegramBot:
         
         # 记录正在执行的命令，防止重复执行
         self.executing_commands = set()  # 存储正在执行的命令类型
+        self._command_lock = asyncio.Lock()  # 保护共享状态的锁
         self.command_tasks = {}  # 存储命令任务引用
         
         # 运行标志
@@ -638,13 +639,15 @@ class TelegramBot:
             await self.send_message("❌ 检查功能未就绪", reply_to=msg_id)
             return
         
-        # 检查是否已有检查正在进行
-        if 'check' in self.executing_commands:
-            await self.send_message("⏳ 域名检查正在进行中，请等待完成后再试", reply_to=msg_id)
-            return
-        
-        # 标记检查开始
-        self.executing_commands.add('check')
+        # 使用锁保护共享状态
+        async with self._command_lock:
+            # 检查是否已有检查正在进行
+            if 'check' in self.executing_commands:
+                await self.send_message("⏳ 域名检查正在进行中，请等待完成后再试", reply_to=msg_id)
+                return
+            
+            # 标记检查开始
+            self.executing_commands.add('check')
         
         try:
             # 直接触发检查，详细信息由 main.py 发送
@@ -652,7 +655,8 @@ class TelegramBot:
             asyncio.create_task(self._execute_check_with_cleanup())
         except Exception as e:
             # 如果有错误，移除标记
-            self.executing_commands.discard('check')
+            async with self._command_lock:
+                self.executing_commands.discard('check')
             self.logger.error(f"启动检查时出错: {e}")
     
     async def _execute_check_with_cleanup(self):
@@ -661,13 +665,15 @@ class TelegramBot:
             await self.check_callback(is_manual=True)
         finally:
             # 检查完成，移除标记
-            self.executing_commands.discard('check')
+            async with self._command_lock:
+                self.executing_commands.discard('check')
     
     async def cmd_stop_check(self, args: str, msg_id: int, user_id: int, username: str):
         """停止当前正在进行的检查"""
-        if 'check' not in self.executing_commands:
-            await self.send_message("ℹ️ 当前没有正在进行的域名检查", reply_to=msg_id)
-            return
+        async with self._command_lock:
+            if 'check' not in self.executing_commands:
+                await self.send_message("ℹ️ 当前没有正在进行的域名检查", reply_to=msg_id)
+                return
         
         if self.stop_check_callback:
             await self.send_message("⏹️ 正在停止当前的域名检查...", reply_to=msg_id)
@@ -987,32 +993,141 @@ class TelegramBot:
                 unack_errors = tracker.get_unacknowledged_errors()
                 ack_errors = tracker.get_acknowledged_errors()
                 
-                message = "🔴 **当前错误状态**\n\n"
+                if not unack_errors and not ack_errors:
+                    await self.send_message("✨ **当前没有错误域名**", reply_to=msg_id)
+                    return
+                
+                # 按错误类型分组未处理错误
+                from collections import defaultdict
+                from domain_checker import CheckStatus
+                
+                error_groups = defaultdict(list)
+                for error in unack_errors:
+                    # 对HTTP错误进行更细致的分类
+                    if error.status == CheckStatus.HTTP_ERROR and hasattr(error, 'status_code') and error.status_code:
+                        error_groups[f'http_{error.status_code}'].append(error)
+                    else:
+                        error_groups[error.status].append(error)
+                
+                message = f"🔴 **当前错误状态**\n\n"
+                message += f"📊 **错误总览**\n"
+                message += f"⚠️ 未处理错误: {len(unack_errors)} 个\n"
+                message += f"✅ 已确认处理: {len(ack_errors)} 个\n\n"
                 
                 if unack_errors:
-                    message += f"⚠️ **未处理错误 ({len(unack_errors)}个)**:\n"
-                    for error in unack_errors[:10]:  # 最多显示10个
-                        message += f"• {error.domain_name} - {error.status.value}\n"
-                    if len(unack_errors) > 10:
-                        message += f"• ... 还有 {len(unack_errors) - 10} 个\n"
-                    message += "\n"
+                    # 错误类型的emoji和中文名称  
+                    error_names = {
+                        CheckStatus.DNS_ERROR: ("🔍", "DNS解析失败"),
+                        CheckStatus.CONNECTION_ERROR: ("🔌", "无法建立连接"), 
+                        CheckStatus.TIMEOUT: ("⏱️", "访问超时"),
+                        CheckStatus.SSL_ERROR: ("🔒", "SSL证书问题"),
+                        CheckStatus.WEBSOCKET_ERROR: ("🌐", "WebSocket连接失败"),
+                    }
+                    
+                    # HTTP错误的处理（与智能通知保持一致）
+                    http_error_names = {
+                        'http_520': ("⚠️", "Cloudflare错误 (520未知错误)"),
+                        'http_521': ("⚠️", "Cloudflare错误 (521服务器离线)"),
+                        'http_522': ("⚠️", "Cloudflare错误 (522连接超时)"),
+                        'http_523': ("⚠️", "Cloudflare错误 (523源站不可达)"),
+                        'http_524': ("⚠️", "Cloudflare错误 (524超时)"),
+                        'http_525': ("⚠️", "Cloudflare错误 (525SSL握手失败)"),
+                        'http_526': ("⚠️", "Cloudflare错误 (526SSL证书无效)"),
+                        'http_502': ("🚪", "网关错误 (502坏网关)"),
+                        'http_503': ("🚪", "网关错误 (503服务暂不可用)"),
+                        'http_504': ("🚪", "网关错误 (504网关超时)"),
+                        'http_500': ("💥", "服务器内部错误 (500)"),
+                        'http_403': ("🚫", "访问被拒绝 (403禁止访问)"),
+                        'http_401': ("🚫", "访问被拒绝 (401未授权)"),
+                        'http_451': ("🚫", "访问被拒绝 (451法律原因)"),
+                        'http_404': ("🔎", "页面不存在 (404)"),
+                        'http_400': ("⚠️", "请求错误 (400错误请求)"),
+                        'http_429': ("⚠️", "请求错误 (429请求过多)")
+                    }
+                    
+                    # 定义显示顺序（与智能通知保持一致）
+                    display_order = [
+                        # Cloudflare错误
+                        'http_520', 'http_521', 'http_522', 'http_523', 'http_524', 'http_525', 'http_526',
+                        # 网关错误
+                        'http_502', 'http_503', 'http_504',
+                        # 其他HTTP错误
+                        'http_500', 'http_403', 'http_401', 'http_451', 'http_404', 'http_400', 'http_429',
+                        # 非HTTP错误
+                        CheckStatus.DNS_ERROR, CheckStatus.CONNECTION_ERROR, 
+                        CheckStatus.TIMEOUT, CheckStatus.SSL_ERROR,
+                        CheckStatus.WEBSOCKET_ERROR, CheckStatus.PHISHING_WARNING,
+                        CheckStatus.SECURITY_WARNING, CheckStatus.UNKNOWN_ERROR
+                    ]
+                    
+                    # 处理所有错误组（包括预定义的和未知的）
+                    all_statuses = list(display_order) + [s for s in error_groups.keys() if s not in display_order]
+                    
+                    # 按类型显示错误（与智能通知格式一致）
+                    for status in all_statuses:
+                        if status not in error_groups:
+                            continue
+                            
+                        errors = error_groups[status]
+                        if not errors:
+                            continue
+                        
+                        # 获取错误名称，如果是枚举则使用其值
+                        if isinstance(status, CheckStatus):
+                            status_value = status.value
+                        else:
+                            status_value = status
+                        
+                        # 对未知的HTTP状态码生成默认名称
+                        if isinstance(status, str) and status.startswith('http_') and status not in http_error_names:
+                            code = status.replace('http_', '')
+                            emoji, display_name = ("❌", f"HTTP错误 ({code})")
+                        elif isinstance(status, str) and status.startswith('http_'):
+                            emoji, display_name = http_error_names.get(status, ("❌", f"HTTP错误 ({status[5:]})"))
+                        else:
+                            emoji, display_name = error_names.get(status, ("⚠️", status_value.upper()))
+                        
+                        # 已经在上面获得了emoji和display_name，无需重复
+                        
+                        message += f"**{emoji} {display_name} ({len(errors)}个):**\n"
+                        for error in errors:
+                            # 构建可点击的URL，只显示域名，不显示错误消息
+                            clickable_url = error.url if error.url.startswith('http') else f"https://{error.domain_name}"
+                            message += f"  • [{error.domain_name}]({clickable_url})\n"
+                        message += "\n"
                 
                 if ack_errors:
                     message += f"✅ **已确认处理 ({len(ack_errors)}个)**:\n"
-                    for error in ack_errors[:5]:
-                        message += f"• {error.domain_name}\n"
-                    if len(ack_errors) > 5:
-                        message += f"• ... 还有 {len(ack_errors) - 5} 个\n"
+                    for error in ack_errors:
+                        clickable_url = error.url if error.url.startswith('http') else f"https://{error.domain_name}"
+                        message += f"  • [{error.domain_name}]({clickable_url})\n"
                     message += "\n"
-                
-                if not unack_errors and not ack_errors:
-                    message += "✨ 没有错误域名\n\n"
                 
                 message += "💡 **使用说明**:\n"
                 message += "`/ack domain.com` - 确认处理某个错误\n"
                 message += "`/history` - 查看历史记录"
                 
-                await self.send_message(message, reply_to=msg_id)
+                # 如果消息过长，可能需要分多条发送
+                if len(message) > 4000:
+                    # 分割消息
+                    parts = []
+                    current = ""
+                    lines = message.split('\n')
+                    
+                    for line in lines:
+                        if len(current) + len(line) + 1 > 4000:
+                            parts.append(current.strip())
+                            current = line + '\n'
+                        else:
+                            current += line + '\n'
+                    
+                    if current.strip():
+                        parts.append(current.strip())
+                    
+                    for part in parts:
+                        await self.send_message(part, reply_to=msg_id)
+                else:
+                    await self.send_message(message, reply_to=msg_id)
             else:
                 await self.send_message("❌ 错误跟踪器未就绪", reply_to=msg_id)
         else:

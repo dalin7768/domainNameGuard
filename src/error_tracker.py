@@ -168,9 +168,8 @@ class ErrorTracker:
                         domain_name=domain,
                         url=result.url,
                         status=CheckStatus.SUCCESS,
-                        is_success=True,
                         response_time=0,
-                        checked_at=datetime.now()
+                        timestamp=datetime.now()
                     )
                     recovered.append(recovered_result)
                     # 添加恢复记录到历史

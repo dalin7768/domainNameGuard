@@ -77,9 +77,6 @@ class ConfigManager:
             "domains": "domains.json",
             "notification": {
                 "level": "smart",  # all: 始终通知, error: 仅错误, smart: 智能通知(只通知变化)
-                "notify_on_recovery": True,
-                "failure_threshold": 2,
-                "cooldown_minutes": 60
             },
             "history": {
                 "enabled": True,
@@ -510,44 +507,6 @@ class ConfigManager:
     
     # 通知配置管理
     
-    def set_cooldown(self, minutes: int) -> tuple[bool, str]:
-        """设置冷却时间"""
-        with self.lock:
-            if minutes < 0:
-                return False, "冷却时间不能为负数"
-            if minutes > 1440:
-                return False, "冷却时间不能大于 1440 分钟（24小时）"
-            
-            self.config['notification']['cooldown_minutes'] = minutes
-            
-            if self.save_config():
-                return True, f"冷却时间已设置为 {minutes} 分钟"
-            else:
-                return False, "保存配置失败"
-    
-    def toggle_recovery_notification(self) -> tuple[bool, str]:
-        """切换恢复通知开关"""
-        with self.lock:
-            current = self.config['notification'].get('notify_on_recovery', True)
-            self.config['notification']['notify_on_recovery'] = not current
-            
-            if self.save_config():
-                status = "开启" if not current else "关闭"
-                return True, f"恢复通知已{status}"
-            else:
-                return False, "保存配置失败"
-    
-    def toggle_all_success_notification(self) -> Tuple[bool, str]:
-        """切换全部正常时通知开关"""
-        with self.lock:
-            current = self.config['notification'].get('notify_on_all_success', False)
-            self.config['notification']['notify_on_all_success'] = not current
-            
-            if self.save_config():
-                status = "开启" if not current else "关闭"
-                return True, f"全部正常通知已{status}"
-            else:
-                return False, "保存配置失败"
     
     # 管理员管理
     def add_admin(self, user_id: int) -> tuple[bool, str]:
@@ -681,9 +640,6 @@ class ConfigManager:
             retry = self.config['check']['retry_count']
             concurrent = self.config['check'].get('max_concurrent', 10)
             auto_adjust = "开启" if self.config['check'].get('auto_adjust_concurrent', True) else "关闭"
-            cooldown = self.config['notification']['cooldown_minutes']
-            recovery = "开启" if self.config['notification']['notify_on_recovery'] else "关闭"
-            all_success = "开启" if self.config['notification'].get('notify_on_all_success', False) else "关闭"
             admins_count = len(self.config['telegram'].get('admin_users', []))
             
             summary = f"""📊 **当前配置**
@@ -694,9 +650,6 @@ class ConfigManager:
 🔁 **重试次数**: {retry} 次
 ⚡ **并发线程**: {concurrent} 个
 🎯 **自适应并发**: {auto_adjust}
-❄️ **冷却时间**: {cooldown} 分钟
-✅ **恢复通知**: {recovery}
-📢 **全正常通知**: {all_success}
 👥 **管理员数**: {admins_count} 人"""
             
             return summary

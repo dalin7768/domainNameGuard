@@ -85,14 +85,16 @@ class DomainMonitor:
         }
         self.daily_report_task: Optional[asyncio.Task] = None  # 每日报告任务
         
-        # 设置信号处理
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
+        # 设置信号处理（在Windows上优化）
+        if sys.platform != "win32":
+            signal.signal(signal.SIGINT, self._signal_handler)
+            signal.signal(signal.SIGTERM, self._signal_handler)
     
     def _signal_handler(self, signum, frame):
         """处理系统信号（如 Ctrl+C）
         
         当收到 SIGINT 或 SIGTERM 信号时，优雅地停止程序
+        信号处理器只设置标志，让主循环检测到并执行异步停止
         
         Args:
             signum: 信号编号
@@ -101,8 +103,6 @@ class DomainMonitor:
         if self.logger:
             self.logger.info(f"收到退出信号 {signum}，正在停止监控...")
         self.is_running = False
-        # 创建停止任务，确保异步清理，发送通知因为是从系统信号停止
-        asyncio.create_task(self.stop(send_notification=True))
     
     def setup_logging(self) -> None:
         """设置日志系统
@@ -178,8 +178,7 @@ class DomainMonitor:
             
             self.notifier = TelegramNotifier(
                 bot_token=telegram_config.get('bot_token'),
-                chat_id=telegram_config.get('chat_id'),
-                cooldown_minutes=notification_config.get('cooldown_minutes', 60)
+                chat_id=telegram_config.get('chat_id')
             )
             self.logger.info("Telegram 通知器初始化完成")
             
@@ -293,7 +292,6 @@ class DomainMonitor:
                 # 获取通知配置信息
                 notification_config = self.config_manager.get('notification', {})
                 notify_level = notification_config.get('level', 'smart')
-                notify_on_recovery = notification_config.get('notify_on_recovery', True)
                 failure_threshold = notification_config.get('failure_threshold', 2)
                 
                 level_desc = {
@@ -310,8 +308,7 @@ class DomainMonitor:
                     f"├ 分批执行: {batches} 批\n"
                     f"└ 预计用时: {eta_minutes}分{eta_seconds}秒\n\n"
                     f"🔔 **通知模式**\n"
-                    f"├ 当前级别: {level_desc.get(notify_level, notify_level)}\n"
-                    f"└ 恢复通知: {'开启' if notify_on_recovery else '关闭'}\n\n"
+                    f"└ 当前级别: {level_desc.get(notify_level, notify_level)}\n\n"
                     f"正在检查中，请稍候..."
                 )
             
@@ -349,9 +346,6 @@ class DomainMonitor:
                     # 立即发送该批次的告警
                     await self.notifier.notify_failures(
                         batch_results,
-                        failure_threshold=notification_config.get('failure_threshold', 2),
-                        notify_recovery=notification_config.get('notify_on_recovery', True),
-                        notify_all_success=False  # 批次模式不发送全部成功通知
                     )
             
             # 定义进度回调
@@ -383,8 +377,6 @@ class DomainMonitor:
             actual_duration = (datetime.now() - check_start_time).total_seconds()
             self.logger.info(f"域名检查完成，实际耗时: {actual_duration:.1f} 秒")
             
-            # 动态更新通知器参数
-            self.notifier.cooldown_minutes = notification_config.get('cooldown_minutes', 60)
             
             # 计算下次执行时间
             max_cycle_minutes = self.config_manager.get('check.interval_minutes', 30)
@@ -411,15 +403,23 @@ class DomainMonitor:
             # 根据通知级别决定是否发送通知
             notify_level = notification_config.get('level', 'smart')
             
+            # 统计结果用于调试
+            success_count = sum(1 for r in results if r.is_success)
+            failed_count = len(results) - success_count
+            self.logger.info(f"检查结果统计 - 总数: {len(results)}, 成功: {success_count}, 失败: {failed_count}")
+            self.logger.info(f"通知级别: {notify_level}, 手动检查: {is_manual}")
+            
             # 如果是手动检查，始终通知
             if is_manual:
                 should_notify = True
                 results_to_notify = results
+                self.logger.info("手动检查 - 将发送通知")
             # 根据通知级别决定
             elif notify_level == 'all':
                 # 始终通知
                 should_notify = True
                 results_to_notify = results
+                self.logger.info("all模式 - 将发送通知")
             elif notify_level == 'error':
                 # 仅在有错误时通知
                 failed_results = [r for r in results if not r.is_success]
@@ -442,25 +442,38 @@ class DomainMonitor:
                 results_to_notify = new_errors + recovered
             
             # 如果不是批次通知模式，或需要最终汇总，发送总体通知
+            self.logger.info(f"通知判断 - batch_notify: {batch_notify}, should_notify: {should_notify}")
             if not batch_notify and should_notify:
+                # 根据通知级别设置quiet_on_success
+                quiet_on_success_setting = notify_level == 'error'  # 只有error模式在全部成功时静默
+                self.logger.info(f"准备发送通知 - 级别: {notify_level}, 手动: {is_manual}, quiet_on_success: {quiet_on_success_setting}")
+                
                 await self.notifier.notify_failures(
                     results_to_notify if notify_level == 'smart' and not is_manual else results,
-                    failure_threshold=notification_config.get('failure_threshold', 2),
-                    notify_recovery=notification_config.get('notify_on_recovery', True),
-                    notify_all_success=False,  # 由notify_level控制
-                    quiet_on_success=False,  # 由notify_level控制
+                    quiet_on_success=quiet_on_success_setting,
                     is_manual=is_manual,
                     next_run_time=next_run_time,
                     new_errors=new_errors if notify_level == 'smart' else None,
                     recovered=recovered if notify_level == 'smart' else None,
                     persistent_errors=persistent_errors if notify_level == 'smart' else None
                 )
+                self.logger.info("通知已发送")
             else:
-                # 批次模式下只发送最终汇总
-                await self.notifier._send_check_summary(results, True, 
-                                                       quiet_on_success=notification_config.get('quiet_on_success', False),
-                                                       is_manual=is_manual,
-                                                       next_run_time=next_run_time)
+                # 批次模式下只发送最终汇总（但仍需检查should_notify）
+                self.logger.info(f"批次模式 - should_notify: {should_notify}")
+                if should_notify:
+                    # 根据通知级别设置quiet_on_success
+                    batch_quiet_setting = notify_level == 'error'  # 只有error模式在全部成功时静默
+                    self.logger.info(f"批次模式准备发送通知 - 级别: {notify_level}, quiet_on_success: {batch_quiet_setting}")
+                    await self.notifier._send_check_summary(
+                        results, 
+                        quiet_on_success=batch_quiet_setting,
+                        is_manual=is_manual,
+                        next_run_time=next_run_time
+                    )
+                    self.logger.info("批次模式通知已发送")
+                else:
+                    self.logger.info("批次模式 - 根据通知级别，跳过发送通知")
             
             # 输出统计信息
             success_count = sum(1 for r in results if r.is_success)
@@ -653,10 +666,16 @@ class DomainMonitor:
             except Exception as e:
                 self.logger.error(f"停止HTTP服务器失败: {e}")
         
-        # 等待所有任务完成
+        # 等待所有任务完成（带超时，更快响应）
         # return_exceptions=True 确保即使任务抛出异常也不会中断
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            try:
+                await asyncio.wait_for(
+                    asyncio.gather(*tasks, return_exceptions=True), 
+                    timeout=2.0  # 2秒超时，更快响应
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning("等待任务停止超时，强制退出")
         
         self.logger.info("监控服务已停止")
     
@@ -1008,7 +1027,6 @@ class DomainMonitor:
         daily_report_config = self.config_manager.get('daily_report', {})
         
         notify_level = notification_config.get('level', 'smart')
-        notify_on_recovery = notification_config.get('notify_on_recovery', True)
         failure_threshold = notification_config.get('failure_threshold', 2)
         max_concurrent = check_config.get('max_concurrent', 50)
         timeout_seconds = check_config.get('timeout_seconds', 10)
@@ -1039,7 +1057,6 @@ class DomainMonitor:
             f"└ 失败重试: {retry_count} 次\n\n"
             f"🔔 **通知模式**\n"
             f"├ 当前级别: {level_desc.get(notify_level, notify_level)}\n"
-            f"├ 恢复通知: {'开启' if notify_on_recovery else '关闭'}\n"
             f"└ 每日统计: {daily_report_time if daily_report_enabled else '关闭'}\n\n"
             f"⏱️ **启动首次检查**\n"
             f"├ 待检域名: {domain_count} 个\n"
@@ -1070,13 +1087,33 @@ class DomainMonitor:
         
         try:
             # 等待所有后台任务
-            # Bot 任务和调度任务会一直运行直到收到停止信号
-            await asyncio.gather(
-                *tasks,
-                return_exceptions=True
-            )
+            # 使用while循环检查is_running状态，以便及时响应Ctrl+C
+            while self.is_running:
+                try:
+                    # 等待任务一小段时间，并检查是否有任务完成
+                    done, pending = await asyncio.wait(
+                        tasks,
+                        timeout=1.0,  # 1秒超时
+                        return_when=asyncio.FIRST_COMPLETED
+                    )
+                    
+                    # 如果有任务完成且不是正常结束，停止程序
+                    for task in done:
+                        if task.exception() and not isinstance(task.exception(), asyncio.CancelledError):
+                            self.logger.error(f"任务出错: {task.exception()}")
+                            self.is_running = False
+                            break
+                    
+                    # 如果所有任务都完成了，退出循环
+                    if not pending:
+                        break
+                        
+                except asyncio.TimeoutError:
+                    # 超时是正常的，继续循环
+                    continue
         except KeyboardInterrupt:
-            self.logger.info("收到停止信号")
+            self.logger.info("收到Ctrl+C信号，正在停止...")
+            self.is_running = False
         finally:
             # 只有在程序还在运行时才调用停止（避免重复调用）
             if self.is_running:
@@ -1100,6 +1137,7 @@ def main():
     except KeyboardInterrupt:
         # 处理 Ctrl+C
         print("\n程序已退出")
+        sys.exit(0)  # 正常退出
     except Exception as e:
         # 处理其他未捕获的异常
         print(f"程序运行出错：{e}")
