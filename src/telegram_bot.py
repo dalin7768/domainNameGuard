@@ -1197,6 +1197,20 @@ class TelegramBot:
         """监听命令的主循环"""
         self.logger.info("开始监听 Telegram 命令")
         
+        # 启动时跳过历史消息，避免处理之前的停止指令
+        try:
+            self.logger.info("跳过历史消息...")
+            updates = await self.get_updates()
+            if updates:
+                # 获取最新的update_id但不处理消息
+                latest_update = max(updates, key=lambda x: x.get("update_id", 0))
+                self.last_update_id = latest_update.get("update_id", 0)
+                self.logger.info(f"已跳过 {len(updates)} 条历史消息，最新update_id: {self.last_update_id}")
+            else:
+                self.logger.info("没有历史消息")
+        except Exception as e:
+            self.logger.warning(f"跳过历史消息时出错: {e}")
+        
         while self.is_running:  # 检查运行标志
             try:
                 updates = await self.get_updates()
