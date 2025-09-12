@@ -139,9 +139,6 @@ domain-monitor/
 - `/timeout 15` - 设置超时时间（秒，1-300）
 - `/retry 3` - 设置重试次数（0-10）
 - `/concurrent 20` - 设置并发数（1-100）
-- `/threshold 2` - 设置失败阈值
-- `/cooldown 60` - 设置通知冷却时间（分钟）
-- `/recovery on` - 开启恢复通知
 - `/autoadjust on` - 开启自适应并发
 - `/reload` - 重新加载配置文件
 
@@ -155,7 +152,7 @@ domain-monitor/
 - `/cfexport 名称 [格式] [sync]` - 导出单个Token域名
 - `/cfexportall [格式] [sync]` - 导出所有Token域名到文件
 - `/cfexportall merge|replace|add` - 导出所有Token域名并实时合并到配置
-- `/cfmerge [名称] [模式]` - 导出并直接合并到监控配置（实时写入）
+- `/cfsync [名称] [模式]` - 同步CF域名到监控配置（实时写入）
 
 ### 系统管理命令
 - `/admin list` - 查看管理员列表  
@@ -307,30 +304,43 @@ domain-monitor/
 /cfexportall json sync
 ```
 
-#### 5. 合并到监控配置
+#### 5. 同步到监控配置
 ```
-# 替换模式（完全替换现有域名）
-/cfmerge 主账号 replace
+# 指定Token的替换模式
+/cfsync 主账号 replace
 
-# 合并模式（保留现有+添加CF域名）
-/cfmerge 主账号 merge
+# 所有Token的替换模式（不填Token名称）
+/cfsync replace
 
-# 添加模式（只添加新的CF域名）
-/cfmerge 主账号 add
+# 指定Token的合并模式
+/cfsync 主账号 merge
+
+# 所有Token的合并模式（不填Token名称）
+/cfsync merge
+
+# 指定Token的添加模式
+/cfsync 主账号 add
+
+# 所有Token的添加模式（不填Token名称）
+/cfsync add
 ```
 
-**cfmerge 合并模式详解**：
-- **`replace`** - 完全替换现有监控域名（清空后重新添加CF域名）
-  - 适用场景：希望监控列表完全与CF域名一致
-  - 影响：会删除所有非CF域名
+**cfsync 同步模式详解**：
+- **`replace`** - 完全替换现有监控域名
+  - 指定Token：用该Token域名替换所有现有域名
+  - 不指定Token：用所有Token域名替换所有现有域名
 - **`merge`** - 合并域名（保留现有 + 添加CF域名，去重）
-  - 适用场景：保持现有域名，同时添加CF域名
-  - 影响：现有域名不会被删除，只添加新的CF域名
+  - 指定Token：保留现有域名，添加该Token的新域名
+  - 不指定Token：保留现有域名，添加所有Token的新域名
 - **`add`** - 仅添加新域名（只添加监控中不存在的CF域名）
-  - 适用场景：增量添加CF域名，避免重复
-  - 影响：不会删除任何域名，只添加不存在的CF域名
+  - 指定Token：只添加该Token中监控不存在的域名
+  - 不指定Token：只添加所有Token中监控不存在的域名
 
-**注意**：cfmerge 操作过程中不会频繁发送进度通知，只在完成或出错时通知
+**Token选择规则**：
+- 指定Token名称：只处理该Token的域名
+- 不指定Token名称：处理所有Token的域名
+
+**注意**：cfsync 操作过程中不会频繁发送进度通知，只在完成或出错时通知
 
 ### 导出功能详解
 
@@ -369,8 +379,8 @@ domain-monitor/
 # 合并导出所有账号域名
 /cfexportall json sync
 
-# 选择主要账号合并到监控配置
-/cfmerge 账号A replace
+# 选择主要账号同步到监控配置
+/cfsync 账号A replace
 ```
 
 ## 🌍 HTTP API 接口说明

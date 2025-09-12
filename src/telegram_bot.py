@@ -56,9 +56,6 @@ class TelegramBot:
             '/timeout': self.cmd_set_timeout,
             '/retry': self.cmd_set_retry,
             '/concurrent': self.cmd_set_concurrent,
-            '/threshold': self.cmd_set_threshold,
-            '/cooldown': self.cmd_set_cooldown,
-            '/recovery': self.cmd_toggle_recovery,
             '/notify': self.cmd_set_notify_level,  # 新的通知级别命令
             '/autoadjust': self.cmd_toggle_autoadjust,
             '/errors': self.cmd_show_errors,  # 查看错误状态
@@ -79,7 +76,7 @@ class TelegramBot:
             '/cfexport': self.cmd_export_cf_domains,
             '/cfexportall': self.cmd_export_all_cf_domains,
             '/cfverify': self.cmd_verify_cf_token,
-            '/cfmerge': self.cmd_merge_cf_domains
+            '/cfsync': self.cmd_sync_cf_domains
         }
         
         # 检查回调函数
@@ -301,7 +298,12 @@ class TelegramBot:
         # 获取当前配置信息
         check_config = self.config_manager.get('check', {})
         notification_config = self.config_manager.get('notification', {})
+        http_config = self.config_manager.get('http_api', {})
+        cf_tokens = self.config_manager.config.get('cloudflare_tokens', {}).get('users', {})
         domains = self.config_manager.get_domains()
+        
+        # 计算用户CF Token数量
+        user_cf_tokens = len(cf_tokens.get(str(user_id), {}).get('tokens', [])) if hasattr(self, 'user_id') else 0
         
         notify_level = notification_config.get('level', 'smart')
         level_desc = {
@@ -314,11 +316,14 @@ class TelegramBot:
 
 ⚙️ **当前配置**:
 • 监控域名: {len(domains)} 个
-• 检查间隔: {check_config.get('interval_minutes', 30)} 分钟
+• 检查间隔: {check_config.get('interval_minutes', 30)} 分钟  
 • 超时时间: {check_config.get('timeout_seconds', 10)} 秒
+• 重试次数: {check_config.get('retry_count', 2)} 次
 • 并发数: {check_config.get('max_concurrent', 10)} 个
+• 自适应并发: {'🟢 开启' if check_config.get('auto_adjust_concurrent', True) else '🔴 关闭'}
 • 通知级别: {level_desc.get(notify_level, notify_level)}
-• 自适应并发: {'开启' if check_config.get('auto_adjust_concurrent', True) else '关闭'}
+• HTTP API: {'🟢 启用' if http_config.get('enabled', False) else '🔴 禁用'} (端口: {http_config.get('port', 8080)})
+• CF Token: {len([token for tokens in cf_tokens.values() for token in tokens.get('tokens', [])])} 个
 
 🌟 **基础命令**:
 `/help` - 显示帮助和配置信息
@@ -347,9 +352,6 @@ class TelegramBot:
 `/timeout 15` - 设置超时时间（秒）
 `/retry 3` - 设置重试次数
 `/concurrent 20` - 设置并发数
-`/threshold 3` - 设置失败阈值
-`/cooldown 30` - 设置通知冷却（分钟）
-`/recovery` - 切换恢复通知
 `/autoadjust` - 切换自适应并发
 
 🔄 **服务控制**:
@@ -371,7 +373,7 @@ class TelegramBot:
 `/cflist` - 查看我的Token列表
 `/cfzones 名称` - 获取域名列表
 `/cfexport 名称` - 导出域名到文件
-`/cfmerge 名称` - 同步到监控配置
+`/cfsync 名称` - 同步到监控配置
 
 💡 **使用说明**:
 • 支持批量操作，用空格或逗号分隔
@@ -747,58 +749,6 @@ class TelegramBot:
             await self.send_message(f"✅ 并发线程数已设置为: {concurrent}", reply_to=msg_id)
         except ValueError:
             await self.send_message("❌ 请输入有效的数字", reply_to=msg_id)
-    
-    async def cmd_set_threshold(self, args: str, msg_id: int, user_id: int, username: str):
-        """设置失败阈值"""
-        if not args:
-            await self.send_message("❌ 请提供失败阈值\n\n示例: `/threshold 3`", reply_to=msg_id)
-            return
-        
-        try:
-            threshold = int(args.strip())
-            success, message = self.config_manager.set_failure_threshold(threshold)
-            
-            if success:
-                await self.send_message(f"✅ {message}", reply_to=msg_id)
-            else:
-                await self.send_message(f"❌ {message}", reply_to=msg_id)
-        except ValueError:
-            await self.send_message("❌ 请输入有效的数字", reply_to=msg_id)
-    
-    async def cmd_set_cooldown(self, args: str, msg_id: int, user_id: int, username: str):
-        """设置冷却时间"""
-        if not args:
-            await self.send_message("❌ 请提供冷却时间（分钟）\n\n示例: `/cooldown 30`", reply_to=msg_id)
-            return
-        
-        try:
-            minutes = int(args.strip())
-            success, message = self.config_manager.set_cooldown(minutes)
-            
-            if success:
-                await self.send_message(f"✅ {message}", reply_to=msg_id)
-            else:
-                await self.send_message(f"❌ {message}", reply_to=msg_id)
-        except ValueError:
-            await self.send_message("❌ 请输入有效的数字", reply_to=msg_id)
-    
-    async def cmd_toggle_recovery(self, args: str, msg_id: int, user_id: int, username: str):
-        """切换恢复通知"""
-        success, message = self.config_manager.toggle_recovery_notification()
-        
-        if success:
-            await self.send_message(f"✅ {message}", reply_to=msg_id)
-        else:
-            await self.send_message(f"❌ {message}", reply_to=msg_id)
-    
-    async def cmd_toggle_all_success(self, args: str, msg_id: int, user_id: int, username: str):
-        """切换全部正常时通知"""
-        success, message = self.config_manager.toggle_all_success_notification()
-        
-        if success:
-            await self.send_message(f"✅ {message}", reply_to=msg_id)
-        else:
-            await self.send_message(f"❌ {message}", reply_to=msg_id)
     
     async def cmd_toggle_autoadjust(self, args: str, msg_id: int, user_id: int, username: str):
         """切换自适应并发"""
@@ -1233,14 +1183,18 @@ class TelegramBot:
 `/cfzones 名称` - 获取Token下的所有域名
 `/cfexport 名称 [格式] [sync]` - 导出单个Token域名到文件
 `/cfexportall [格式] [sync]` - 导出所有Token域名到文件（合并）
-`/cfmerge [名称] [模式]` - 导出并直接合并到监控配置
+`/cfsync [名称] [模式]` - 同步CF域名到监控配置
 
-🔄 **cfmerge 合并模式详解**:
-• `replace` - 完全替换现有监控域名（清空后重新添加CF域名）
+🔄 **cfsync 同步模式详解**:
+• `replace` - 完全替换现有监控域名（指定Token则用该Token，不指定则用所有Token）
 • `merge` - 合并域名（保留现有 + 添加CF域名，去重）
 • `add` - 仅添加新域名（只添加监控中不存在的CF域名）
 
-⚠️ **注意**: cfmerge操作过程中不会频繁发送进度通知，只在完成或出错时通知
+📝 **Token选择规则**:
+• 指定Token名称：只处理该Token的域名
+• 不指定Token名称：处理所有Token的域名
+
+⚠️ **注意**: cfsync操作过程中不会频繁发送进度通知，只在完成或出错时通知
 
 📝 **使用说明**:
 • 每个用户可以添加多个API Token
@@ -1248,16 +1202,17 @@ class TelegramBot:
 • 导出支持txt、json、csv格式
 • 支持同步删除功能（sync参数）
 • 可单独或合并导出所有Token域名
-• cfmerge直接更新监控配置，无需手动同步
+• cfsync直接更新监控配置，无需手动同步
 
 💡 **示例**:
 `/cftoken add 主账号 abcd1234...`
 `/cfzones 主账号`
 `/cfexport 主账号 json sync` - 导出为JSON并同步删除
 `/cfexportall txt` - 合并导出所有Token为TXT格式
-`/cfmerge 主账号 replace` - 用主账号域名完全替换监控列表
-`/cfmerge 主账号 merge` - 合并主账号域名到现有监控列表
-`/cfmerge merge` - 合并所有Token域名到监控列表"""
+`/cfsync 主账号 replace` - 用主账号域名替换监控列表
+`/cfsync replace` - 用所有Token域名替换监控列表
+`/cfsync 主账号 merge` - 合并主账号域名到现有监控列表
+`/cfsync merge` - 合并所有Token域名到监控列表"""
         
         await self.send_message(help_text, reply_to=msg_id)
     
@@ -1438,7 +1393,7 @@ class TelegramBot:
                     response += f"... 还有 {len(domains) - 10} 个域名\n"
             
             response += f"\n💡 **其他操作**:\n"
-            response += f"• `/cfmerge {token_name}` - 同步到监控配置\n"
+            response += f"• `/cfsync {token_name}` - 同步到监控配置\n"
             response += f"• `/cfexportall` - 导出所有Token域名"
             
             await self.send_message(response, reply_to=msg_id)
@@ -1476,7 +1431,7 @@ class TelegramBot:
             # 不发送进度通知，只记录错误
             async def progress_callback(domain: str, added_count: int, total_processed: int):
                 # 仅记录到日志，不发送Telegram消息
-                self.logger.debug(f"cfmerge进度: 已处理{total_processed}个域名，已添加{added_count}个域名")
+                self.logger.debug(f"cfsync进度: 已处理{total_processed}个域名，已添加{added_count}个域名")
             
             # 执行实时合并操作（所有Token）
             result = await self.cf_manager.export_and_merge_domains_realtime(
@@ -1560,7 +1515,7 @@ class TelegramBot:
                     response += f"... 还有 {len(domains) - 10} 个域名\n"
             
             response += f"\n💡 **其他操作**:\n"
-            response += f"• `/cfmerge merge` - 合并所有Token到监控配置"
+            response += f"• `/cfsync merge` - 合并所有Token到监控配置"
             
             await self.send_message(response, reply_to=msg_id)
         else:
@@ -1570,8 +1525,8 @@ class TelegramBot:
                 reply_to=msg_id
             )
     
-    async def cmd_merge_cf_domains(self, args: str, msg_id: int, user_id: int, username: str):
-        """导出CF域名并直接合并到domains配置"""
+    async def cmd_sync_cf_domains(self, args: str, msg_id: int, user_id: int, username: str):
+        """同步CF域名到monitoring配置"""
         parts = args.split() if args else []
         
         # 解析参数
@@ -1585,45 +1540,29 @@ class TelegramBot:
             elif part not in ["replace", "merge", "add"]:
                 token_name = part
         
-        # 如果没有指定token名称，询问用户
-        if not token_name and merge_mode == "replace":
+        # 如果没有指定token名称，处理所有token的情况
+        if not token_name:
             # 获取用户的token列表
             user_tokens = self.cf_manager.token_manager.get_user_tokens(str(user_id))
             if not user_tokens:
                 await self.send_message("❌ 您还没有添加任何Cloudflare Token", reply_to=msg_id)
                 return
                 
-            if len(user_tokens) == 1:
-                token_name = user_tokens[0]["name"]
-            else:
-                token_list = "\n".join([f"• `{token['name']}`" for token in user_tokens])
-                await self.send_message(
-                    "❌ 请指定Token名称或合并模式\n\n"
-                    "**用法**:\n"
-                    "`/cfmerge [Token名称] [模式]`\n\n"
-                    "**可用Token**:\n"
-                    f"{token_list}\n\n"
-                    "**合并模式**:\n"
-                    "• `replace` - 完全替换现有域名（默认）\n"
-                    "• `merge` - 合并现有域名和CF域名\n"
-                    "• `add` - 只添加新的CF域名\n\n"
-                    "**示例**:\n"
-                    "`/cfmerge 主账号 replace` - 用主账号域名替换\n"
-                    "`/cfmerge merge` - 合并所有Token域名",
-                    reply_to=msg_id
-                )
-                return
+            # 统一逻辑：不填token名称就使用所有token
+            # 不需要额外的询问或特殊处理
         
         # 显示操作提示
-        mode_desc = {
-            "replace": "替换所有域名",
-            "merge": "合并域名", 
-            "add": "添加新域名"
-        }
-        
         token_desc = token_name or "所有Token"
+        
+        if merge_mode == "replace":
+            operation_desc = f"用{token_desc}域名替换监控列表"
+        elif merge_mode == "merge":
+            operation_desc = f"合并{token_desc}域名到监控列表"
+        else:  # add
+            operation_desc = f"添加{token_desc}中的新域名"
+        
         await self.send_message(
-            f"🔄 正在{mode_desc[merge_mode]}...\n"
+            f"🔄 正在{operation_desc}...\n"
             f"• Token: {token_desc}\n"
             f"• 模式: {merge_mode}",
             reply_to=msg_id
@@ -1632,7 +1571,7 @@ class TelegramBot:
         # 不发送进度通知，只记录错误
         async def progress_callback(domain: str, added_count: int, total_processed: int):
             # 仅记录到日志，不发送Telegram消息
-            self.logger.debug(f"cfmerge进度: 已处理{total_processed}个域名，已添加{added_count}个域名")
+            self.logger.debug(f"cfsync进度: 已处理{total_processed}个域名，已添加{added_count}个域名")
         
         # 执行实时合并操作
         result = await self.cf_manager.export_and_merge_domains_realtime(
