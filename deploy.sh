@@ -162,12 +162,13 @@ Group=$USER
 WorkingDirectory=$PROJECT_DIR
 Environment="PATH=$PROJECT_DIR/venv/bin"
 ExecStart=$PROJECT_DIR/venv/bin/python $PROJECT_DIR/src/main.py
-Restart=always
+Restart=on-failure
 RestartSec=10
-# 退出码3表示重启请求
+# 退出码3表示重启请求，0表示正常停止
+RestartPreventExitStatus=0
 SuccessExitStatus=3
-StandardOutput=append:/var/log/domain-monitor.log
-StandardError=append:/var/log/domain-monitor.log
+StandardOutput=append:/var/log/domain-monitor-deploy.log
+StandardError=append:/var/log/domain-monitor-deploy.log
 
 [Install]
 WantedBy=multi-user.target
@@ -178,25 +179,25 @@ EOF
     sudo systemctl daemon-reload
     echo -e "${GREEN}Systemd服务创建成功${NC}"
     
-    # 6. 配置日志轮转
-    echo -e "\n${YELLOW}[6/7] 配置日志轮转...${NC}"
+    # 6. 配置systemd服务日志轮转
+    echo -e "\n${YELLOW}[6/7] 配置服务日志轮转...${NC}"
     LOGROTATE_FILE="/etc/logrotate.d/domain-monitor"
     sudo tee $LOGROTATE_FILE > /dev/null << EOF
-/var/log/domain-monitor.log {
+# systemd服务日志轮转配置（50M限制）
+/var/log/domain-monitor-deploy.log {
     daily
-    rotate 7
-    maxsize 100M
+    rotate 3
+    maxsize 50M
     compress
     delaycompress
     missingok
     notifempty
     create 644 $USER $USER
-    postrotate
-        systemctl reload domain-monitor > /dev/null 2>&1 || true
-    endscript
+    copytruncate
 }
 EOF
-    echo -e "${GREEN}日志轮转配置成功（每日轮转，保留7天）${NC}"
+    echo -e "${GREEN}服务日志轮转配置成功（最大50M，保留3份）${NC}"
+    echo -e "${BLUE}注意: 程序日志(domain_monitor.log)由程序内部管理轮转${NC}"
     
     # 7. 启动服务
     echo -e "\n${YELLOW}[7/7] 启动服务...${NC}"
@@ -223,6 +224,7 @@ echo -e "\n${BLUE}常用命令：${NC}"
 echo -e "  更新代码后重新部署: ${YELLOW}./deploy.sh update${NC}"
 echo -e "  仅重启服务: ${YELLOW}./deploy.sh restart${NC}"
 echo -e "  查看服务状态: ${YELLOW}sudo systemctl status domain-monitor${NC}"
-echo -e "  查看实时日志: ${YELLOW}sudo journalctl -u domain-monitor -f${NC}"
-echo -e "  停止服务: ${YELLOW}sudo systemctl stop domain-monitor${NC}"
-echo -e "  卸载服务: ${YELLOW}sudo systemctl disable domain-monitor${NC}"
+echo -e "  查看服务日志: ${YELLOW}sudo tail -f /var/log/domain-monitor-deploy.log${NC}"
+echo -e "  查看程序日志: ${YELLOW}tail -f $PROJECT_DIR/domain_monitor.log${NC}"
+echo -e "  停止服务（不重启）: ${YELLOW}sudo systemctl stop domain-monitor${NC}"
+echo -e "  完全禁用服务: ${YELLOW}sudo systemctl disable domain-monitor${NC}"

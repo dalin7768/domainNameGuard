@@ -16,10 +16,7 @@
     "show_eta": true
   },
 
-  "domains": [
-    "https://example.com",
-    "https://test.com"
-  ],
+  "domains": "domains.json",
 
   "notification": {
     "level": "smart",
@@ -76,7 +73,7 @@
   "logging": {
     "level": "INFO",
     "file": "domain_monitor.log",
-    "max_size_mb": 10,
-    "backup_count": 5
+    "max_size_mb": 100,
+    "backup_count": 3
   }
 }

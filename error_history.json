@@ -584,8 +584,80 @@
       "acknowledged": false,
       "acknowledged_time": null,
       "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T18:21:09.994669",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T18:21:09.994669",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T18:21:09.994669",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T18:21:09.994669",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T19:47:02.442530",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits38.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T19:47:02.443536",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T19:47:02.443536",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
+    },
+    {
+      "domain_name": "www.ausbits68.com",
+      "status": "http_error",
+      "error_type": "http_error",
+      "timestamp": "2025-09-11T19:47:02.443536",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "预期状态码：[200, 201, 202, 203, 204, 301, 302, 303, 304, 307, 308, 401, 403]，实际：526"
     }
   ],
   "acknowledged_errors": [],
-  "last_updated": "2025-09-11T18:02:32.243608"
+  "last_updated": "2025-09-11T19:49:49.893482"
 }
