@@ -198,6 +198,7 @@ class DomainMonitor:
             self.bot.set_callbacks(
                 check=self.run_check,      # /check 命令
                 stop=lambda **kwargs: self.stop(**kwargs),  # /stop 命令，支持 force 参数
+                stop_check=self.stop_check,  # /stopcheck 命令，停止当前检查
                 restart=self.restart_service,  # /restart 命令，重启服务
                 reload=self.reload_config,  # /reload 命令，重新加载配置
                 get_status=self.get_status_info,  # /status 命令，获取详细状态
@@ -675,6 +676,20 @@ class DomainMonitor:
             'is_running': self.is_running
         }
     
+    async def stop_check(self):
+        """停止当前正在进行的检查任务"""
+        if self.check_task and not self.check_task.done():
+            self.logger.info("正在停止当前的域名检查任务...")
+            self.check_task.cancel()
+            try:
+                await self.check_task
+            except asyncio.CancelledError:
+                self.logger.info("域名检查任务已停止")
+            except Exception as e:
+                self.logger.error(f"停止检查任务时出错: {e}")
+        else:
+            self.logger.info("当前没有正在运行的检查任务")
+
     async def get_error_tracker(self):
         """获取错误跟踪器
         

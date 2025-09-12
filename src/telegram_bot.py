@@ -51,6 +51,7 @@ class TelegramBot:
             '/remove': self.cmd_remove_domain,
             '/clear': self.cmd_clear_domains,
             '/check': self.cmd_check_now,
+            '/stopcheck': self.cmd_stop_check,
             '/config': self.cmd_show_config,
             '/interval': self.cmd_set_interval,
             '/timeout': self.cmd_set_timeout,
@@ -82,6 +83,7 @@ class TelegramBot:
         # 检查回调函数
         self.check_callback: Optional[Callable] = None
         self.stop_callback: Optional[Callable] = None
+        self.stop_check_callback: Optional[Callable] = None  # 停止检查的回调
         self.restart_callback: Optional[Callable] = None
         self.reload_callback: Optional[Callable] = None
         self.get_status_callback: Optional[Callable] = None  # 获取状态信息的回调
@@ -90,6 +92,7 @@ class TelegramBot:
     
     def set_callbacks(self, check: Optional[Callable] = None, 
                       stop: Optional[Callable] = None,
+                      stop_check: Optional[Callable] = None,
                       restart: Optional[Callable] = None,
                       reload: Optional[Callable] = None,
                       get_status: Optional[Callable] = None,
@@ -100,6 +103,8 @@ class TelegramBot:
             self.check_callback = check
         if stop:
             self.stop_callback = stop
+        if stop_check:
+            self.stop_check_callback = stop_check
         if restart:
             self.restart_callback = restart
         if reload:
@@ -329,6 +334,7 @@ class TelegramBot:
 `/help` - 显示帮助和配置信息
 `/status` - 查看详细监控状态
 `/check` - 立即执行域名检查
+`/stopcheck` - 停止当前正在进行的检查
 
 📝 **域名管理**:
 `/list` - 查看所有监控域名
@@ -628,11 +634,50 @@ class TelegramBot:
     
     async def cmd_check_now(self, args: str, msg_id: int, user_id: int, username: str):
         """立即检查命令"""
-        if self.check_callback:
-            # 直接触发检查，详细信息由 main.py 发送
-            asyncio.create_task(self.check_callback(is_manual=True))
-        else:
+        if not self.check_callback:
             await self.send_message("❌ 检查功能未就绪", reply_to=msg_id)
+            return
+        
+        # 检查是否已有检查正在进行
+        if 'check' in self.executing_commands:
+            await self.send_message("⏳ 域名检查正在进行中，请等待完成后再试", reply_to=msg_id)
+            return
+        
+        # 标记检查开始
+        self.executing_commands.add('check')
+        
+        try:
+            # 直接触发检查，详细信息由 main.py 发送
+            # 使用create_task异步执行，但不等待完成
+            asyncio.create_task(self._execute_check_with_cleanup())
+        except Exception as e:
+            # 如果有错误，移除标记
+            self.executing_commands.discard('check')
+            self.logger.error(f"启动检查时出错: {e}")
+    
+    async def _execute_check_with_cleanup(self):
+        """执行检查并清理标记的辅助方法"""
+        try:
+            await self.check_callback(is_manual=True)
+        finally:
+            # 检查完成，移除标记
+            self.executing_commands.discard('check')
+    
+    async def cmd_stop_check(self, args: str, msg_id: int, user_id: int, username: str):
+        """停止当前正在进行的检查"""
+        if 'check' not in self.executing_commands:
+            await self.send_message("ℹ️ 当前没有正在进行的域名检查", reply_to=msg_id)
+            return
+        
+        if self.stop_check_callback:
+            await self.send_message("⏹️ 正在停止当前的域名检查...", reply_to=msg_id)
+            try:
+                await self.stop_check_callback()
+                await self.send_message("✅ 域名检查已停止", reply_to=msg_id)
+            except Exception as e:
+                await self.send_message(f"❌ 停止检查时出错: {str(e)}", reply_to=msg_id)
+        else:
+            await self.send_message("❌ 停止检查功能未就绪", reply_to=msg_id)
     
     async def cmd_show_config(self, args: str, msg_id: int, user_id: int, username: str):
         """显示当前配置"""

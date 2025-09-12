@@ -123,7 +123,8 @@ domain-monitor/
 - `/start` - 启动消息和基本信息
 - `/status` - 查看当前监控状态
 - `/list` - 查看所有监控域名
-- `/check` - 立即执行一次检查
+- `/check` - 立即执行一次检查（防重复执行保护）
+- `/stopcheck` - 停止当前正在进行的检查
 - `/errors` - 查看当前错误状态
 - `/history` - 查看历史记录
 - `/ack [domain]` - 确认处理错误
@@ -152,7 +153,7 @@ domain-monitor/
 - `/cfexport 名称 [格式] [sync]` - 导出单个Token域名
 - `/cfexportall [格式] [sync]` - 导出所有Token域名到文件
 - `/cfexportall merge|replace|add` - 导出所有Token域名并实时合并到配置
-- `/cfsync [名称] [模式]` - 同步CF域名到监控配置（实时写入）
+- `/cfsync [名称] [模式]` - 同步CF域名到监控配置（实时写入，低噪音通知）
 
 ### 系统管理命令
 - `/admin list` - 查看管理员列表  
@@ -340,7 +341,7 @@ domain-monitor/
 - 指定Token名称：只处理该Token的域名
 - 不指定Token名称：处理所有Token的域名
 
-**注意**：cfsync 操作过程中不会频繁发送进度通知，只在完成或出错时通知
+**注意**：cfsync 操作过程中采用低噪音通知策略，不会频繁发送进度通知，只在完成或出错时通知
 
 ### 导出功能详解
 
@@ -565,6 +566,11 @@ curl "http://botsite.thai2570.com:8080/health"
 - 确认用户在admin_users列表中（如果设置了）
 - 查看日志文件检查错误信息
 
+**3. 停止命令后自动重启**
+- 检查systemd服务配置中的Restart策略
+- 确认deploy.sh使用正确的重启策略（on-failure而非always）
+- 停止命令会设置正确的退出码避免自动重启
+
 ### 域名检查问题
 
 **1. 检查超时频繁**
@@ -603,6 +609,11 @@ curl "http://botsite.thai2570.com:8080/health"
 - 检查配置文件JSON格式
 - 确认文件权限可读写
 - 重启服务以应用所有更改
+
+**3. 命令重复执行问题**
+- `/check` 命令具有重复执行保护机制
+- 如需停止正在进行的检查，使用 `/stopcheck` 命令
+- 查看执行状态可使用 `/status` 命令
 
 ## 📚 学习路径
 
