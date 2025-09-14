@@ -890,26 +890,63 @@ class DomainMonitor:
     async def restart_service(self) -> None:
         """重启监控服务
         
-        通过退出程序让 systemd 或 PM2 重启服务
+        检测运行环境并选择适当的重启方式
         """
         self.logger.info("收到重启命令，准备重启服务...")
+        
+        # 检测是否运行在systemd下
+        is_systemd = self._is_running_under_systemd()
         
         # 发送重启通知
         if self.bot:
             try:
-                await self.bot.send_message("🔄 服务正在重启，请稍候...")
+                if is_systemd:
+                    await self.bot.send_message("🔄 服务正在重启，请稍候...")
+                else:
+                    await self.bot.send_message(
+                        "⚠️ **重启请求**\n\n"
+                        "检测到程序未通过systemd运行。\n"
+                        "程序将停止，请手动重启：\n"
+                        "`python src/main.py`\n\n"
+                        "💡 建议使用 `./deploy.sh` 部署为系统服务"
+                    )
             except Exception as e:
                 self.logger.error(f"发送重启通知失败: {e}")
         
         # 停止所有任务
         await self.stop(send_notification=False, force=True)
         
-        # 退出程序，让进程管理器重启
+        if is_systemd:
+            # 在systemd环境下，使用退出码3触发重启
+            import os
+            self.logger.info("程序即将退出并由systemd重启...")
+            os._exit(3)
+        else:
+            # 非systemd环境，正常退出
+            import sys
+            self.logger.info("程序已停止，请手动重启")
+            sys.exit(0)
+    
+    def _is_running_under_systemd(self) -> bool:
+        """检测是否运行在systemd下"""
         import os
-        import sys
-        self.logger.info("程序即将退出并由进程管理器重启...")
-        # 退出码3表示需要重启
-        os._exit(3)
+        try:
+            # 检查是否有systemd相关环境变量
+            if 'SYSTEMD_EXEC_PID' in os.environ:
+                return True
+            # 检查父进程是否为systemd
+            with open('/proc/1/comm', 'r') as f:
+                init_process = f.read().strip()
+                if init_process == 'systemd':
+                    return True
+            # 检查当前进程的服务状态
+            import subprocess
+            result = subprocess.run(['systemctl', 'is-active', 'domain-monitor'], 
+                                  capture_output=True, text=True)
+            return result.returncode == 0
+        except:
+            # 如果检查失败，假设不是systemd环境
+            return False
     
     async def reload_config(self) -> None:
         """重新加载配置
@@ -925,8 +962,9 @@ class DomainMonitor:
         # 重新加载配置文件
         self.config_manager.load_config()
         
-        # 获取新的间隔时间
+        # 获取新的间隔时间和域名
         new_interval = self.config_manager.get('check.interval_minutes', 30)
+        domains = self.config_manager.get_domains()
         
         # 更新内存中的当前间隔时间
         self.current_interval = new_interval
@@ -936,6 +974,14 @@ class DomainMonitor:
         self.bot.bot_token = telegram_config.get('bot_token')
         self.bot.chat_id = telegram_config.get('chat_id')
         self.bot.api_base_url = f"https://api.telegram.org/bot{self.bot.bot_token}"
+        
+        # 更新通知器的配置
+        if self.notifier:
+            self.notifier.bot_token = self.bot.bot_token
+            self.notifier.chat_id = self.bot.chat_id
+            self.notifier.api_base_url = f"https://api.telegram.org/bot{self.bot.bot_token}"
+        
+        self.logger.info(f"重新加载后，域名列表包含 {len(domains)} 个域名")
         
         # 如果间隔时间改变了，重启定时检查任务
         if old_interval != new_interval:
@@ -955,14 +1001,16 @@ class DomainMonitor:
             await self.bot.send_message(
                 f"🔄 **配置已重新加载**\n\n"
                 f"⏰ 检查间隔已更新：{old_interval} → {new_interval} 分钟\n"
+                f"🌐 监控域名：{len(domains)} 个\n"
                 f"✅ 新的间隔时间已生效\n"
                 f"⏱️ 下次检查将在 {new_interval} 分钟后执行"
             )
         else:
             await self.bot.send_message(
-                "🔄 **配置已重新加载**\n\n"
-                "✅ 配置更新成功\n"
-                "💡 检查间隔未改变"
+                f"🔄 **配置已重新加载**\n\n"
+                f"🌐 监控域名：{len(domains)} 个\n"
+                f"✅ 配置更新成功\n"
+                f"💡 检查间隔未改变 ({new_interval} 分钟)"
             )
         
         self.logger.info("配置重新加载完成")
