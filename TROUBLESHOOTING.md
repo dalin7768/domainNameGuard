@@ -25,7 +25,7 @@ SuccessExitStatus=3
 
 ### 修复方案
 
-已在 `deploy.sh` 和 `deploy-multi.sh` 中修复：
+已在新版 `deploy.sh` 中修复：
 
 ```ini
 # 新配置（已修复）
@@ -40,26 +40,18 @@ SuccessExitStatus=0 3
 
 ### 如何应用修复
 
-#### 单实例服务修复
+#### 应用修复
 
-如果使用原始 `deploy.sh`：
-
-```bash
-# 重新部署以应用修复
-./deploy.sh update
-```
-
-#### 多实例服务修复
-
-如果使用 `deploy-multi.sh`：
+使用新版 `deploy.sh` 脚本：
 
 ```bash
-# 方法1：重新部署所有实例
-./deploy-multi.sh stop-all
-./deploy-multi.sh deploy N  # N是实例数量
+# 方法1：重新部署实例
+./deploy.sh stop-all
+./deploy.sh deploy client1  # 重新部署指定实例
 
 # 方法2：更新现有实例
-./deploy-multi.sh update
+./deploy.sh update-all  # 更新所有实例
+./deploy.sh update client1  # 更新指定实例
 ```
 
 #### 手动修复现有服务
@@ -67,12 +59,9 @@ SuccessExitStatus=0 3
 如果不想重新部署，可以手动编辑服务文件：
 
 ```bash
-# 单实例服务
-sudo nano /etc/systemd/system/domain-monitor.service
-
-# 多实例服务
-sudo nano /etc/systemd/system/domain-monitor-1.service
-sudo nano /etc/systemd/system/domain-monitor-2.service
+# 编辑服务文件（根据实例名称）
+sudo nano /etc/systemd/system/domain-monitor-client1-client1.service
+sudo nano /etc/systemd/system/domain-monitor-client1-client2.service
 # ... 其他实例
 
 # 在 [Service] 部分找到并修改：
@@ -81,10 +70,8 @@ SuccessExitStatus=0 3
 # 重新加载配置
 sudo systemctl daemon-reload
 
-# 重启服务
-sudo systemctl restart domain-monitor
-# 或
-sudo systemctl restart domain-monitor-1
+# 重启服务（根据实例名称）
+sudo systemctl restart domain-monitor-client1-client1
 ```
 
 ## 常见问题排查
@@ -97,7 +84,7 @@ sudo systemctl restart domain-monitor-1
 
 ```bash
 # 检查服务配置
-sudo systemctl cat domain-monitor
+sudo systemctl cat domain-monitor-client1
 
 # 查看 SuccessExitStatus 设置
 # 应该是：SuccessExitStatus=0 3
@@ -113,13 +100,13 @@ sudo systemctl cat domain-monitor
 
 ```bash
 # 查看服务状态
-sudo systemctl status domain-monitor
+sudo systemctl status domain-monitor-client1
 
 # 查看详细日志
-sudo journalctl -u domain-monitor -f
+sudo journalctl -u domain-monitor-client1 -f
 
 # 查看程序日志
-tail -f /var/log/domain-monitor-deploy.log
+tail -f /var/log/domain-monitor-client1-deploy.log
 ```
 
 **可能原因**：
@@ -128,7 +115,7 @@ tail -f /var/log/domain-monitor-deploy.log
 3. 端口被占用
 4. 权限问题
 
-### 3. 多实例端口冲突
+### 3. 实例端口冲突
 
 **症状**：多个实例无法同时启动
 
@@ -139,7 +126,7 @@ tail -f /var/log/domain-monitor-deploy.log
 netstat -tlnp | grep :8000
 
 # 查看实例状态
-./deploy-multi.sh status
+./deploy.sh status
 ```
 
 **解决方案**：
@@ -159,7 +146,7 @@ ls -la config*.json
 ls -la src/main.py
 
 # 检查日志文件权限
-ls -la /var/log/domain-monitor*.log
+ls -la /var/log/domain-monitor-client1*.log
 ```
 
 **解决方案**：
@@ -170,61 +157,36 @@ chmod 644 config*.json
 chmod +x src/main.py
 
 # 修复日志权限
-sudo chown $USER:$USER /var/log/domain-monitor*.log
+sudo chown $USER:$USER /var/log/domain-monitor-client1*.log
 ```
 
 ## 测试修复是否成功
 
-### 单实例测试
-
 ```bash
-# 启动服务
-sudo systemctl start domain-monitor
+# 启动实例
+sudo systemctl start domain-monitor-client1
+# 或使用脚本：./deploy.sh start client1
 
 # 等待几秒，确认服务运行
-sudo systemctl is-active domain-monitor
+sudo systemctl is-active domain-monitor-client1
 
 # 测试停止（应该不会重启）
-sudo systemctl stop domain-monitor
+sudo systemctl stop domain-monitor-client1
+# 或使用脚本：./deploy.sh stop client1
 
 # 等待几秒，确认服务已停止
-sudo systemctl is-active domain-monitor
+sudo systemctl is-active domain-monitor-client1
 # 应该输出：inactive
 
 # 测试重启
-sudo systemctl start domain-monitor
+sudo systemctl start domain-monitor-client1
 sleep 5
-sudo systemctl restart domain-monitor
+sudo systemctl restart domain-monitor-client1
+# 或使用脚本：./deploy.sh restart client1
 
 # 确认重启成功
-sudo systemctl is-active domain-monitor
+sudo systemctl is-active domain-monitor-client1
 # 应该输出：active
-```
-
-### 多实例测试
-
-```bash
-# 启动第一个实例
-./deploy-multi.sh start 1
-
-# 确认运行
-./deploy-multi.sh status 1
-
-# 测试停止
-./deploy-multi.sh stop 1
-
-# 等待几秒，确认已停止
-./deploy-multi.sh status 1
-# 应该显示：已停止
-
-# 测试重启
-./deploy-multi.sh start 1
-sleep 5
-./deploy-multi.sh restart 1
-
-# 确认重启成功
-./deploy-multi.sh status 1
-# 应该显示：运行中
 ```
 
 ## 预防措施
@@ -237,13 +199,13 @@ sleep 5
 2. **监控服务状态**：
    ```bash
    # 添加到 crontab，每5分钟检查一次
-   */5 * * * * systemctl is-active --quiet domain-monitor || echo "Service down" | mail -s "Alert" your@email.com
+   */5 * * * * systemctl is-active --quiet domain-monitor-client1 || echo "Service down" | mail -s "Alert" your@email.com
    ```
 
 3. **日志轮转检查**：
    ```bash
    # 检查日志轮转配置
-   sudo logrotate -d /etc/logrotate.d/domain-monitor*
+   sudo logrotate -d /etc/logrotate.d/domain-monitor-client1*
    ```
 
 ## 紧急恢复
@@ -252,16 +214,17 @@ sleep 5
 
 ```bash
 # 强制停止所有相关进程
-sudo pkill -f "domain-monitor"
+sudo pkill -f "domain-monitor-client1"
 
 # 删除服务文件
-sudo rm /etc/systemd/system/domain-monitor*.service
+sudo rm /etc/systemd/system/domain-monitor-client1*.service
 
 # 重新加载 systemd
 sudo systemctl daemon-reload
 
-# 重新部署
-./deploy-multi.sh deploy 3  # 或使用 ./deploy.sh
+# 重新部署（根据需要的实例）
+./deploy.sh deploy client1
+./deploy.sh deploy client2
 ```
 
 ## 联系支持
@@ -274,14 +237,14 @@ uname -a
 systemctl --version
 
 # 服务状态
-sudo systemctl status domain-monitor*
+sudo systemctl status domain-monitor-client1*
 
 # 日志信息
-sudo journalctl -u domain-monitor* --no-pager
+sudo journalctl -u domain-monitor-client1* --no-pager
 
 # 配置文件内容
 cat config*.json
 
 # 进程信息
-ps aux | grep domain-monitor
+ps aux | grep domain-monitor-client1
 ```

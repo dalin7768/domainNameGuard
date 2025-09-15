@@ -6,7 +6,8 @@
       "Bash(python:*)",
       "Bash(pip install:*)",
       "Bash(rm:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(find:*)"
     ],
     "deny": [],
     "ask": []
