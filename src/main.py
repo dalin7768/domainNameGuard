@@ -1229,13 +1229,22 @@ pause"""
 
 def main():
     """主函数入口
-    
+
     程序的入口点，创建监控器实例并运行
     处理退出信号和异常
+    支持命令行参数指定配置文件
     """
-    # 创建监控器实例
-    monitor = DomainMonitor()
-    
+    import argparse
+
+    # 解析命令行参数
+    parser = argparse.ArgumentParser(description="域名监控服务")
+    parser.add_argument('--config', '-c', default='config.json',
+                       help='配置文件路径 (默认: config.json)')
+    args = parser.parse_args()
+
+    # 创建监控器实例，使用指定的配置文件
+    monitor = DomainMonitor(config_file=args.config)
+
     try:
         # 使用 asyncio.run 运行异步主程序
         # 这个函数会创建事件循环并运行直到完成

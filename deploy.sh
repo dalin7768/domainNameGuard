@@ -164,9 +164,10 @@ Environment="PATH=$PROJECT_DIR/venv/bin"
 ExecStart=$PROJECT_DIR/venv/bin/python $PROJECT_DIR/src/main.py
 Restart=on-failure
 RestartSec=10
-# 退出码3表示重启请求，0表示正常停止
+# 退出码0表示正常停止，不重启
+# 退出码3表示程序请求重启，允许重启
 RestartPreventExitStatus=0
-SuccessExitStatus=3
+SuccessExitStatus=0 3
 StandardOutput=append:/var/log/domain-monitor-deploy.log
 StandardError=append:/var/log/domain-monitor-deploy.log
 
