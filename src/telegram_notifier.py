@@ -533,15 +533,23 @@ class TelegramNotifier:
                     emoji, display_name = error_names.get(status, ("⚠️", status_value.upper()))
                 
                 message += f"**{emoji} {display_name} ({len(errors)}个):**\n"
-                for error in errors:
+                # 限制显示域名数量，避免消息过长
+                max_show = 10
+                for error in errors[:max_show]:
                     message += f"  • {error.domain_name}\n"
+                if len(errors) > max_show:
+                    message += f"  ... 还有 {len(errors) - max_show} 个域名\n"
                 message += "\n"
         
         # 已恢复（简单列表即可）
         if recovered:
             message += f"✅ **已恢复正常 ({len(recovered)}个)**:\n"
-            for rec in recovered:
+            # 限制显示恢复域名数量
+            max_recovered_show = 15
+            for rec in recovered[:max_recovered_show]:
                 message += f"• {rec.domain_name}\n"
+            if len(recovered) > max_recovered_show:
+                message += f"... 还有 {len(recovered) - max_recovered_show} 个已恢复\n"
             message += "\n"
         
         # 持续错误提醒

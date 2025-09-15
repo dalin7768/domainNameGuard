@@ -348,11 +348,12 @@ class DomainMonitor:
                         batch_results,
                     )
             
-            # 定义进度回调
+            # 定义进度回调 - 根据用户要求，进一步限制进度消息
             async def progress_callback(completed, total, eta_seconds):
                 """进度更新回调"""
-                # 每完成25%或最少50个发送一次进度
-                if completed % max(50, total // 4) == 0 and completed < total:
+                # 用户要求禁用不必要的进度消息，只在域名数量非常多时才显示
+                # 条件：域名数量>500，且每完成50%才发送一次
+                if total > 500 and completed % (total // 2) == 0 and completed < total:
                     progress_percent = (completed / total) * 100
                     eta_text = ""
                     if eta_seconds > 0:
@@ -361,16 +362,25 @@ class DomainMonitor:
                         eta_text = f" - 剩余: {eta_min}分{eta_sec}秒"
                     
                     msg = f"⏳ 进度: {completed}/{total} ({progress_percent:.1f}%){eta_text}"
+                    # 使用异步非阻塞方式发送进度消息
                     try:
-                        await self.bot.send_message(msg)
+                        # 创建任务并保持引用，避免被垃圾回收
+                        task = asyncio.create_task(self._send_progress_message(msg))
+                        # 添加完成回调来处理异常，避免任务异常被忽略
+                        def handle_task_done(task):
+                            try:
+                                task.result()  # 获取结果，如果有异常会抛出
+                            except Exception as e:
+                                self.logger.debug(f"发送进度消息失败: {e}")
+                        task.add_done_callback(handle_task_done)
                     except Exception as e:
-                        self.logger.error(f"发送进度通知失败：{e}")
+                        self.logger.debug(f"创建进度通知任务失败：{e}")
             
-            # 执行批处理检查
+            # 执行批处理检查 - 根据用户要求完全禁用进度回调
             results = await self.checker.check_domains_batch(
                 domains,
                 batch_callback=batch_callback if batch_notify else None,
-                progress_callback=progress_callback if show_eta and domain_count > 50 else None
+                progress_callback=None  # 禁用进度消息避免卡住问题
             )
             
             # 计算实际耗时
@@ -765,6 +775,14 @@ class DomainMonitor:
                 self.daily_stats["error_summary"][error_type] = \
                     self.daily_stats["error_summary"].get(error_type, 0) + 1
     
+    async def _send_progress_message(self, message: str) -> None:
+        """发送进度消息（非阻塞方式）"""
+        try:
+            if self.bot:
+                await self.bot.send_message(message)
+        except Exception as e:
+            self.logger.debug(f"发送进度消息失败: {e}")
+
     async def send_daily_report(self) -> None:
         """发送每日统计报告"""
         if not self.bot:
@@ -900,8 +918,16 @@ class DomainMonitor:
         # 发送重启通知
         if self.bot:
             try:
+                import platform
                 if is_systemd:
                     await self.bot.send_message("🔄 服务正在重启，请稍候...")
+                elif platform.system() == 'Windows':
+                    await self.bot.send_message(
+                        "🔄 **Windows重启**\n\n"
+                        "正在创建重启脚本并重新启动程序...\n"
+                        "如果重启失败，请手动运行：\n"
+                        "`python src/main.py`"
+                    )
                 else:
                     await self.bot.send_message(
                         "⚠️ **重启请求**\n\n"
@@ -922,24 +948,56 @@ class DomainMonitor:
             self.logger.info("程序即将退出并由systemd重启...")
             os._exit(3)
         else:
-            # 非systemd环境，正常退出
+            # 非systemd环境，尝试使用操作系统特定的重启方式
+            import platform
+            import os
             import sys
-            self.logger.info("程序已停止，请手动重启")
-            sys.exit(0)
+            
+            if platform.system() == 'Windows':
+                # Windows环境：创建重启脚本
+                restart_script = """@echo off
+timeout /t 2 /nobreak > nul
+cd /d "%~dp0"
+python src/main.py
+pause"""
+                try:
+                    # 写入重启脚本
+                    with open('restart.bat', 'w', encoding='utf-8') as f:
+                        f.write(restart_script)
+                    
+                    self.logger.info("正在通过批处理脚本重启程序...")
+                    # 启动重启脚本并退出当前程序
+                    os.system('start restart.bat')
+                    sys.exit(0)
+                except Exception as e:
+                    self.logger.error(f"创建重启脚本失败: {e}")
+                    self.logger.info("程序已停止，请手动重启")
+                    sys.exit(0)
+            else:
+                # Linux/Unix环境，尝试简单重启
+                self.logger.info("程序已停止，请手动重启")
+                sys.exit(0)
     
     def _is_running_under_systemd(self) -> bool:
         """检测是否运行在systemd下"""
         import os
+        import platform
+        
+        # Windows环境下肯定不是systemd
+        if platform.system() == 'Windows':
+            return False
+            
         try:
             # 检查是否有systemd相关环境变量
             if 'SYSTEMD_EXEC_PID' in os.environ:
                 return True
-            # 检查父进程是否为systemd
-            with open('/proc/1/comm', 'r') as f:
-                init_process = f.read().strip()
-                if init_process == 'systemd':
-                    return True
-            # 检查当前进程的服务状态
+            # 检查父进程是否为systemd（仅Linux）
+            if os.path.exists('/proc/1/comm'):
+                with open('/proc/1/comm', 'r') as f:
+                    init_process = f.read().strip()
+                    if init_process == 'systemd':
+                        return True
+            # 检查当前进程的服务状态（仅Linux）
             import subprocess
             result = subprocess.run(['systemctl', 'is-active', 'domain-monitor'], 
                                   capture_output=True, text=True)

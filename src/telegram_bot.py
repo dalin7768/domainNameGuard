@@ -511,12 +511,21 @@ class TelegramBot:
         unique_domains = list(dict.fromkeys(domains))
         has_duplicates = len(domains) != len(unique_domains)
         
-        domain_list = "\n".join([f"{i+1}. `{domain}`" for i, domain in enumerate(domains)])
+        # 限制显示域名数量，避免消息过长
+        max_display = 20
+        if len(domains) <= max_display:
+            domain_list = "\n".join([f"{i+1}. `{domain}`" for i, domain in enumerate(domains)])
+            list_text = domain_list
+        else:
+            # 只显示前20个，其余用省略号表示
+            shown_domains = domains[:max_display]
+            domain_list = "\n".join([f"{i+1}. `{domain}`" for i, domain in enumerate(shown_domains)])
+            list_text = f"{domain_list}\n\n... 还有 {len(domains) - max_display} 个域名未显示"
         
         # 构建消息
         text = f"""📝 **监控域名列表** ({len(domains)} 个)
 
-{domain_list}
+{list_text}
 
 💡 **快速操作**:
 `/add example.com` - 添加更多
@@ -562,9 +571,7 @@ class TelegramBot:
         # 构建响应消息
         response = ""
         if success_list:
-            response += f"✅ **成功添加 {len(success_list)} 个域名**:\n"
-            for url in success_list:
-                response += f"  • {url}\n"
+            response += f"✅ **成功添加 {len(success_list)} 个域名**\n"
         
         if fail_list:
             response += f"\n❌ **失败 {len(fail_list)} 个**:\n"
@@ -1090,17 +1097,27 @@ class TelegramBot:
                         # 已经在上面获得了emoji和display_name，无需重复
                         
                         message += f"**{emoji} {display_name} ({len(errors)}个):**\n"
-                        for error in errors:
+                        # 限制显示域名数量，避免消息过长
+                        max_show = 10
+                        for i, error in enumerate(errors[:max_show]):
                             # 构建可点击的URL，只显示域名，不显示错误消息
                             clickable_url = error.url if error.url.startswith('http') else f"https://{error.domain_name}"
                             message += f"  • [{error.domain_name}]({clickable_url})\n"
+                        
+                        if len(errors) > max_show:
+                            message += f"  ... 还有 {len(errors) - max_show} 个域名\n"
                         message += "\n"
                 
                 if ack_errors:
                     message += f"✅ **已确认处理 ({len(ack_errors)}个)**:\n"
-                    for error in ack_errors:
+                    # 限制显示已确认错误数量
+                    max_ack_show = 5
+                    for error in ack_errors[:max_ack_show]:
                         clickable_url = error.url if error.url.startswith('http') else f"https://{error.domain_name}"
                         message += f"  • [{error.domain_name}]({clickable_url})\n"
+                    
+                    if len(ack_errors) > max_ack_show:
+                        message += f"  ... 还有 {len(ack_errors) - max_ack_show} 个已处理\n"
                     message += "\n"
                 
                 message += "💡 **使用说明**:\n"

@@ -890,8 +890,422 @@
       "acknowledged": false,
       "acknowledged_time": null,
       "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "binancezgzj.cc",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.binancezgzj.cc",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "toobitmobileapp.com",
+      "status": "security_warning",
+      "error_type": "security_warning",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "网站可能存在安全风险"
+    },
+    {
+      "domain_name": "www.toobitmobileapp.com",
+      "status": "security_warning",
+      "error_type": "security_warning",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "网站可能存在安全风险"
+    },
+    {
+      "domain_name": "vwinxq.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "vwinxr.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.vwinxq.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.vwinxr.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "vwinx01.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.vwinx01.com",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.hotcoiny.coim",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "phemety1.vip",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "phemety3.vip",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.phemety1.vip",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.phemety3.vip",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "mimitrade.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "titrader.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "tytrader.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "mixuetrade.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "mitradeweb.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.mimitrade.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.titrader.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.tytrader.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.mixuetrade.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.mitradeweb.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "buy.btcboox.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "buy.btcboux.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "buy.btcbbo.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "buy.btcbbt.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "buy.btcbboz.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "buy.btcbozday.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "btcboox.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.btcboox.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "btcboux.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.btcboux.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "btcbbo.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.btcbbo.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "btcbbt.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.btcbbt.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "btcbboz.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.btcbboz.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "btcbozday.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "www.btcbozday.top",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T10:44:24.877902",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
+    },
+    {
+      "domain_name": "toobitmobileapp.com",
+      "status": "security_warning",
+      "error_type": "security_warning",
+      "timestamp": "2025-09-15T11:01:58.349690",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "网站可能存在安全风险"
+    },
+    {
+      "domain_name": "www.toobitmobileapp.com",
+      "status": "security_warning",
+      "error_type": "security_warning",
+      "timestamp": "2025-09-15T11:01:58.349690",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "网站可能存在安全风险"
+    },
+    {
+      "domain_name": "www.hotcoiny.coim",
+      "status": "dns_error",
+      "error_type": "dns_error",
+      "timestamp": "2025-09-15T11:01:58.349690",
+      "acknowledged": false,
+      "acknowledged_time": null,
+      "notes": "[Errno 11001] getaddrinfo failed"
     }
   ],
   "acknowledged_errors": [],
-  "last_updated": "2025-09-12T19:59:08.762700"
+  "last_updated": "2025-09-15T11:01:58.350690"
 }
