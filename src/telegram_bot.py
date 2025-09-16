@@ -297,11 +297,16 @@ class TelegramBot:
             
             # 执行命令
             if command in self.commands:
-                # 检查权限
-                if command not in ['/help', '/start', '/status', '/list']:
+                # 检查权限 - 定义需要管理员权限的命令
+                admin_commands = ['/add', '/remove', '/interval', '/timeout', '/check', '/reload',
+                                '/stop', '/restart', '/admin', '/cf', '/cftoken', '/cfzones',
+                                '/cfexport', '/cfexportall', '/cfsync']
+
+                if command in admin_commands:
                     if not self.is_authorized(user_id, username):
                         await self.send_message(
-                            "❌ 您没有权限执行此命令",
+                            "❌ 您没有权限执行此命令\n\n"
+                            "需要管理员权限的命令，请联系管理员",
                             reply_to=message_id
                         )
                         return
@@ -325,10 +330,22 @@ class TelegramBot:
                         # 标记命令开始执行
                         if command in blocking_commands:
                             self.executing_commands.add(command)
-                        
+
                         # 执行命令
                         await self.commands[command](args, message_id, user_id, username)
-                        
+
+                    except Exception as e:
+                        # 命令执行出错时发送错误消息给用户
+                        self.logger.error(f"执行命令 {command} 时出错: {e}")
+                        try:
+                            await self.send_message(
+                                f"❌ 命令执行失败: {str(e)}",
+                                reply_to=message_id
+                            )
+                        except:
+                            # 如果连发送错误消息都失败了，至少记录日志
+                            self.logger.error(f"发送错误消息失败")
+
                     finally:
                         # 命令执行完成，移除标记
                         if command in blocking_commands:

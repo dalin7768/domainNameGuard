@@ -8,7 +8,8 @@
       "Bash(rm:*)",
       "Bash(chmod:*)",
       "Bash(find:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
