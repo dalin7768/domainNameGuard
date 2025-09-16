@@ -1016,6 +1016,7 @@ pause"""
         telegram_config = self.config_manager.get('telegram', {})
         self.bot.bot_token = telegram_config.get('bot_token')
         self.bot.chat_id = telegram_config.get('chat_id')
+        self.bot.admin_users = telegram_config.get('admin_users', [])
         self.bot.api_base_url = f"https://api.telegram.org/bot{self.bot.bot_token}"
         
         # 更新通知器的配置

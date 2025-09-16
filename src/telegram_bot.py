@@ -47,8 +47,6 @@ class TelegramBot:
         # 运行标志
         self.is_running = True
 
-        # 当前聊天ID（用于兼容旧方法）
-        self.current_chat_id = None
         
         # 命令处理器映射
         self.commands: Dict[str, Callable] = {
@@ -324,7 +322,7 @@ class TelegramBot:
             # 检查是否是配置的群组消息
             chat = message.get("chat", {})
             chat_id = str(chat.get("id"))
-            if chat_id not in self.groups_config:
+            if chat_id != self.chat_id:
                 return
             
             # 获取消息文本
@@ -387,18 +385,8 @@ class TelegramBot:
                         if command in blocking_commands:
                             self.executing_commands.add(command)
 
-                        # 临时设置当前聊天ID，方便兼容没有chat_id参数的旧方法
-                        self.current_chat_id = chat_id
-
-                        # 检查命令方法是否接受chat_id参数
-                        import inspect
-                        sig = inspect.signature(self.commands[command])
-                        if 'chat_id' in sig.parameters:
-                            # 新方法：传递chat_id参数
-                            await self.commands[command](args, message_id, user_id, username, chat_id)
-                        else:
-                            # 旧方法：不传递chat_id，使用current_chat_id
-                            await self.commands[command](args, message_id, user_id, username)
+                        # 执行命令
+                        await self.commands[command](args, message_id, user_id, username, chat_id)
 
                     except Exception as e:
                         # 命令执行出错时发送错误消息给用户
