@@ -146,9 +146,8 @@ ExecStart=$PROJECT_DIR/venv/bin/python $PROJECT_DIR/src/main.py --config=$config
 Restart=on-failure
 RestartSec=10
 # 退出码0表示正常停止，不重启
-# 退出码3表示程序请求重启，允许重启
+# 退出码3表示程序请求重启，systemd会自动重启
 RestartPreventExitStatus=0
-SuccessExitStatus=0 3
 StandardOutput=append:$log_file
 StandardError=append:$log_file
 

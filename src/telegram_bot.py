@@ -14,7 +14,7 @@ class TelegramBot:
     def __init__(self, config_manager: ConfigManager):
         """
         初始化 Telegram Bot
-        
+
         Args:
             config_manager: 配置管理器实例
         """
@@ -22,13 +22,16 @@ class TelegramBot:
         self.bot_token = config_manager.get('telegram.bot_token')
         self.chat_id = config_manager.get('telegram.chat_id')
         self.logger = logging.getLogger(__name__)
-        
+
         # Cloudflare管理器
         self.cf_manager = CloudflareManager(config_manager=config_manager)
-        
+
         # API 基础 URL
         self.api_base_url = f"https://api.telegram.org/bot{self.bot_token}"
-        
+
+        # 创建专用的HTTP客户端，避免与域名检测共享连接池
+        self._http_client: Optional[httpx.AsyncClient] = None
+
         # 上次处理的更新 ID
         self.last_update_id = 0
         # 记录已处理的消息ID，避免重复处理
@@ -90,6 +93,23 @@ class TelegramBot:
         self.get_status_callback: Optional[Callable] = None  # 获取状态信息的回调
         self.send_daily_report_callback: Optional[Callable] = None  # 发送每日报告的回调
         self.error_tracker_callback: Optional[Callable] = None  # 获取错误跟踪器的回调
+
+    @property
+    def http_client(self) -> httpx.AsyncClient:
+        """获取HTTP客户端，延迟初始化"""
+        if self._http_client is None:
+            self._http_client = httpx.AsyncClient(
+                timeout=30,
+                limits=httpx.Limits(max_connections=5, max_keepalive_connections=2),
+                # 专用于Telegram API，避免与域名检测冲突
+            )
+        return self._http_client
+
+    async def close(self):
+        """关闭HTTP客户端"""
+        if self._http_client is not None:
+            await self._http_client.aclose()
+            self._http_client = None
     
     def set_callbacks(self, check: Optional[Callable] = None, 
                       stop: Optional[Callable] = None,
@@ -131,11 +151,10 @@ class TelegramBot:
             if reply_to:
                 params["reply_to_message_id"] = reply_to
             
-            async with httpx.AsyncClient(timeout=10) as client:
-                response = await client.post(
-                    f"{self.api_base_url}/sendMessage",
-                    json=params
-                )
+            response = await self.http_client.post(
+                f"{self.api_base_url}/sendMessage",
+                json=params
+            )
                 
                 if response.status_code == 200:
                     return True
@@ -190,14 +209,13 @@ class TelegramBot:
     async def get_updates(self) -> list:
         """获取新消息"""
         try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.get(
-                    f"{self.api_base_url}/getUpdates",
-                    params={
-                        "offset": self.last_update_id + 1,
-                        "timeout": 25
-                    }
-                )
+            response = await self.http_client.get(
+                f"{self.api_base_url}/getUpdates",
+                params={
+                    "offset": self.last_update_id + 1,
+                    "timeout": 25
+                }
+            )
                 
                 if response.status_code == 200:
                     data = response.json()
@@ -892,13 +910,22 @@ class TelegramBot:
         if self.stop_callback:
             # 设置停止标志，结束监听循环
             self.is_running = False
+            try:
+                # 先发送停止消息
+                await self.send_message("🛑 监控服务已停止", reply_to=msg_id)
+                # 等待消息发送完成
+                await asyncio.sleep(0.5)
+            except Exception as e:
+                self.logger.error(f"发送停止消息失败: {e}")
+
             # 调用停止回调，传递send_notification=False避免重复发送消息
             await self.stop_callback(send_notification=False, force=True)
-            await self.send_message("🛑 监控服务已停止", reply_to=msg_id)
+
             # 停止后立即退出程序
             import sys
+            import os
             self.logger.info("收到停止命令，程序即将退出")
-            sys.exit(0)
+            os._exit(0)  # 使用os._exit确保立即退出
         else:
             await self.send_message("❌ 停止功能未就绪", reply_to=msg_id)
     

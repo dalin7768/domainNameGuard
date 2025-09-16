@@ -674,6 +674,14 @@ class DomainMonitor:
                 self.logger.info("HTTP API 服务器已停止")
             except Exception as e:
                 self.logger.error(f"停止HTTP服务器失败: {e}")
+
+        # 关闭Telegram Bot的HTTP客户端
+        if self.bot:
+            try:
+                await self.bot.close()
+                self.logger.info("Telegram Bot 已清理")
+            except Exception as e:
+                self.logger.error(f"清理Telegram Bot失败: {e}")
         
         # 等待所有任务完成（带超时，更快响应）
         # return_exceptions=True 确保即使任务抛出异常也不会中断
