@@ -308,8 +308,7 @@ class DomainMonitor:
                     f"├ 分批执行: {batches} 批\n"
                     f"└ 预计用时: {eta_minutes}分{eta_seconds}秒\n\n"
                     f"🔔 **通知模式**\n"
-                    f"└ 当前级别: {level_desc.get(notify_level, notify_level)}\n\n"
-                    f"正在检查中，请稍候..."
+                    f"└ 当前级别: {level_desc.get(notify_level, notify_level)}"
                 )
             
             self.logger.info(f"检查 {domain_count} 个域名，并发数 {max_concurrent}，分 {batches} 批")
@@ -920,7 +919,8 @@ class DomainMonitor:
             try:
                 import platform
                 if is_systemd:
-                    await self.bot.send_message("🔄 服务正在重启，请稍候...")
+                    # systemd 会自动重启，不需要提示
+                    pass
                 elif platform.system() == 'Windows':
                     await self.bot.send_message(
                         "🔄 **Windows重启**\n\n"

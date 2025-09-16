@@ -156,7 +156,37 @@ class TelegramBot:
         except Exception as e:
             self.logger.error(f"发送消息时出错: {e}")
             return False
-    
+
+    async def send_long_message(self, text: str, reply_to: Optional[int] = None, max_length: int = 4000):
+        """发送长消息，如果超过限制则分段发送"""
+        if len(text) <= max_length:
+            await self.send_message(text, reply_to=reply_to)
+            return
+
+        # 分割消息
+        parts = []
+        current = ""
+        lines = text.split('\n')
+
+        for line in lines:
+            # 如果当前行加上这一行超过限制
+            if len(current) + len(line) + 1 > max_length:
+                if current.strip():  # 只有当current不为空时才添加
+                    parts.append(current.strip())
+                current = line + '\n'
+            else:
+                current += line + '\n'
+
+        # 添加最后一部分
+        if current.strip():
+            parts.append(current.strip())
+
+        # 发送所有部分
+        for i, part in enumerate(parts):
+            # 为第一条消息添加reply_to，后续消息不用
+            reply_to_use = reply_to if i == 0 else None
+            await self.send_message(part, reply_to=reply_to_use)
+
     async def get_updates(self) -> list:
         """获取新消息"""
         try:
@@ -511,16 +541,9 @@ class TelegramBot:
         unique_domains = list(dict.fromkeys(domains))
         has_duplicates = len(domains) != len(unique_domains)
         
-        # 限制显示域名数量，避免消息过长
-        max_display = 20
-        if len(domains) <= max_display:
-            domain_list = "\n".join([f"{i+1}. `{domain}`" for i, domain in enumerate(domains)])
-            list_text = domain_list
-        else:
-            # 只显示前20个，其余用省略号表示
-            shown_domains = domains[:max_display]
-            domain_list = "\n".join([f"{i+1}. `{domain}`" for i, domain in enumerate(shown_domains)])
-            list_text = f"{domain_list}\n\n... 还有 {len(domains) - max_display} 个域名未显示"
+        # 显示所有域名，不再限制数量
+        domain_list = "\n".join([f"{i+1}. `{domain}`" for i, domain in enumerate(domains)])
+        list_text = domain_list
         
         # 构建消息
         text = f"""📝 **监控域名列表** ({len(domains)} 个)
@@ -538,7 +561,7 @@ class TelegramBot:
             text += f"\n\n⚠️ **发现 {duplicate_count} 个重复域名**"
             text += f"\n实际唯一域名数: {len(unique_domains)} 个"
         
-        await self.send_message(text, reply_to=msg_id)
+        await self.send_long_message(text, reply_to=msg_id)
     
     async def cmd_add_domain(self, args: str, msg_id: int, user_id: int, username: str):
         """添加域名命令（支持批量）"""
@@ -683,7 +706,6 @@ class TelegramBot:
                 return
         
         if self.stop_check_callback:
-            await self.send_message("⏹️ 正在停止当前的域名检查...", reply_to=msg_id)
             try:
                 await self.stop_check_callback()
                 await self.send_message("✅ 域名检查已停止", reply_to=msg_id)
@@ -749,7 +771,6 @@ class TelegramBot:
                 
                 # 如果间隔改变了，触发配置重新加载以立即生效
                 if old_interval != minutes and self.reload_callback:
-                    await self.send_message("🔄 正在重新加载配置以应用新的间隔时间...", reply_to=msg_id)
                     await self.reload_callback()
             else:
                 await self.send_message(f"❌ {message}", reply_to=msg_id)
@@ -869,11 +890,11 @@ class TelegramBot:
     async def cmd_stop(self, args: str, msg_id: int, user_id: int, username: str):
         """停止监控 - 立即强制停止"""
         if self.stop_callback:
-            await self.send_message("🛑 正在强制停止监控服务...", reply_to=msg_id)
             # 设置停止标志，结束监听循环
             self.is_running = False
             # 调用停止回调，传递send_notification=False避免重复发送消息
             await self.stop_callback(send_notification=False, force=True)
+            await self.send_message("🛑 监控服务已停止", reply_to=msg_id)
             # 停止后立即退出程序
             import sys
             self.logger.info("收到停止命令，程序即将退出")
@@ -912,8 +933,8 @@ class TelegramBot:
     async def cmd_reload(self, args: str, msg_id: int, user_id: int, username: str):
         """重新加载配置"""
         if self.reload_callback:
-            await self.send_message("🔄 正在重新加载配置...", reply_to=msg_id)
             await self.reload_callback()
+            # reload_callback 内部会发送完成消息
         else:
             await self.send_message("❌ 重新加载功能未就绪", reply_to=msg_id)
     
@@ -1097,54 +1118,26 @@ class TelegramBot:
                         # 已经在上面获得了emoji和display_name，无需重复
                         
                         message += f"**{emoji} {display_name} ({len(errors)}个):**\n"
-                        # 限制显示域名数量，避免消息过长
-                        max_show = 10
-                        for i, error in enumerate(errors[:max_show]):
+                        # 显示所有域名，不再限制数量
+                        for error in errors:
                             # 构建可点击的URL，只显示域名，不显示错误消息
                             clickable_url = error.url if error.url.startswith('http') else f"https://{error.domain_name}"
                             message += f"  • [{error.domain_name}]({clickable_url})\n"
-                        
-                        if len(errors) > max_show:
-                            message += f"  ... 还有 {len(errors) - max_show} 个域名\n"
                         message += "\n"
                 
                 if ack_errors:
                     message += f"✅ **已确认处理 ({len(ack_errors)}个)**:\n"
-                    # 限制显示已确认错误数量
-                    max_ack_show = 5
-                    for error in ack_errors[:max_ack_show]:
+                    # 显示所有已确认错误，不再限制数量
+                    for error in ack_errors:
                         clickable_url = error.url if error.url.startswith('http') else f"https://{error.domain_name}"
                         message += f"  • [{error.domain_name}]({clickable_url})\n"
-                    
-                    if len(ack_errors) > max_ack_show:
-                        message += f"  ... 还有 {len(ack_errors) - max_ack_show} 个已处理\n"
                     message += "\n"
                 
                 message += "💡 **使用说明**:\n"
                 message += "`/ack domain.com` - 确认处理某个错误\n"
                 message += "`/history` - 查看历史记录"
                 
-                # 如果消息过长，可能需要分多条发送
-                if len(message) > 4000:
-                    # 分割消息
-                    parts = []
-                    current = ""
-                    lines = message.split('\n')
-                    
-                    for line in lines:
-                        if len(current) + len(line) + 1 > 4000:
-                            parts.append(current.strip())
-                            current = line + '\n'
-                        else:
-                            current += line + '\n'
-                    
-                    if current.strip():
-                        parts.append(current.strip())
-                    
-                    for part in parts:
-                        await self.send_message(part, reply_to=msg_id)
-                else:
-                    await self.send_message(message, reply_to=msg_id)
+                await self.send_long_message(message, reply_to=msg_id)
             else:
                 await self.send_message("❌ 错误跟踪器未就绪", reply_to=msg_id)
         else:
@@ -1317,7 +1310,6 @@ class TelegramBot:
         elif action == "now":
             # 立即发送今日报告
             if self.send_daily_report_callback:
-                await self.send_message("📊 正在生成今日统计报告...", reply_to=msg_id)
                 await self.send_daily_report_callback()
             else:
                 await self.send_message("❌ 报告功能未就绪", reply_to=msg_id)
@@ -1520,18 +1512,15 @@ class TelegramBot:
             
             # 构建域名列表
             zone_list = f"🌐 **域名列表** ({len(zones)} 个)\n\n"
-            for i, zone in enumerate(zones[:20], 1):  # 最多显示20个
+            for i, zone in enumerate(zones, 1):  # 显示所有域名
                 zone_name = zone.get("name", "")
                 zone_status = zone.get("status", "")
                 status_emoji = "🟢" if zone_status == "active" else "🟡"
                 zone_list += f"{i}. {status_emoji} `{zone_name}`\n"
-            
-            if len(zones) > 20:
-                zone_list += f"\n... 还有 {len(zones) - 20} 个域名"
-            
+
             zone_list += f"\n\n💡 使用 `/cfexport {token_name}` 导出所有域名"
-            
-            await self.send_message(zone_list, reply_to=msg_id)
+
+            await self.send_long_message(zone_list, reply_to=msg_id)
         else:
             await self.send_message(
                 f"❌ **获取域名失败**\n\n"

@@ -260,32 +260,15 @@ restart_instance() {
 
     echo -e "\n${YELLOW}重启实例 ${name}...${NC}"
 
-    # 先停止服务
-    echo -e "${YELLOW}正在停止服务...${NC}"
-    sudo systemctl stop $service_name
+    # 使用 systemctl restart 直接重启
+    sudo systemctl restart $service_name
 
-    # 等待服务完全停止
-    sleep 3
-
-    # 确认服务已停止
-    if sudo systemctl is-active --quiet $service_name; then
-        echo -e "${YELLOW}服务未完全停止，强制停止...${NC}"
-        sudo systemctl kill $service_name
-        sleep 2
-    fi
-
-    # 重新加载配置并启动
-    echo -e "${YELLOW}正在启动服务...${NC}"
-    sudo systemctl daemon-reload
-    sudo systemctl start $service_name
-
-    # 检查启动结果
-    sleep 3
+    # 检查重启结果
+    sleep 2
     if sudo systemctl is-active --quiet $service_name; then
         echo -e "${GREEN}✓ 实例 ${name} 重启成功${NC}"
     else
         echo -e "${RED}✗ 实例 ${name} 重启失败${NC}"
-        echo -e "${YELLOW}查看详细状态:${NC}"
         sudo systemctl status $service_name --no-pager
         return 1
     fi
