@@ -20,12 +20,9 @@ class TelegramBot:
         """
         self.config_manager = config_manager
         self.bot_token = config_manager.get('telegram.bot_token')
-        # 支持多群组：获取群组配置
-        self.groups_config = config_manager.get('telegram.groups', {})
-        # 兼容旧版单群组配置
-        single_chat_id = config_manager.get('telegram.chat_id')
-        if single_chat_id and not self.groups_config:
-            self.groups_config = {single_chat_id: {"domains": config_manager.get_domains(), "admins": config_manager.get('telegram.admin_users', [])}}
+        # 单群组配置
+        self.chat_id = config_manager.get('telegram.chat_id')
+        self.admin_users = config_manager.get('telegram.admin_users', [])
 
         self.logger = logging.getLogger(__name__)
 
@@ -133,16 +130,11 @@ class TelegramBot:
                           reply_to: Optional[int] = None, chat_id: Optional[str] = None) -> bool:
         """发送消息"""
         try:
-            # 确定目标聊天ID的优先级：
-            # 1. 明确指定的chat_id
-            # 2. 当前聊天ID（current_chat_id）
-            # 3. 第一个配置的群组ID（兼容旧版）
-            target_chat_id = (chat_id or
-                            getattr(self, 'current_chat_id', None) or
-                            next(iter(self.groups_config.keys())) if self.groups_config else None)
+            # 使用指定的chat_id或默认的群组chat_id
+            target_chat_id = chat_id or self.chat_id
 
             if not target_chat_id:
-                self.logger.error("没有配置任何群组")
+                self.logger.error("没有配置chat_id")
                 return False
 
             params = {
@@ -245,93 +237,61 @@ class TelegramBot:
         """
         return self.config_manager.is_admin_by_username(username)
 
-    def is_authorized_for_group(self, user_id: int, username: str, chat_id: str) -> bool:
-        """检查用户是否有指定群组的管理权限
+    def is_authorized(self, user_id: int, username: str) -> bool:
+        """检查用户是否有管理权限
 
         Args:
             user_id: 用户ID
             username: 用户名
-            chat_id: 群组ID
 
         Returns:
             bool: 是否有权限
         """
-        if chat_id not in self.groups_config:
-            return False
-
-        group_config = self.groups_config[chat_id]
-        group_admins = group_config.get('admins', [])
-
-        # 检查用户名是否在该群组的管理员列表中
-        if username and username in group_admins:
+        # 如果没有配置管理员，所有人都有权限
+        if not self.admin_users:
             return True
 
-        # 兼容：检查是否是全局管理员
-        return self.config_manager.is_admin_by_username(username)
+        # 检查用户名是否在管理员列表中
+        if username:
+            # 支持带@和不带@的用户名
+            username_with_at = f"@{username}" if not username.startswith('@') else username
+            username_without_at = username[1:] if username.startswith('@') else username
 
-    def get_group_domains(self, chat_id: str) -> list:
-        """获取指定群组的域名列表
+            return (username in self.admin_users or
+                    username_with_at in self.admin_users or
+                    username_without_at in self.admin_users)
 
-        Args:
-            chat_id: 群组ID
+        return False
+
+    def get_domains(self) -> list:
+        """获取域名列表
 
         Returns:
             list: 域名列表
         """
-        if chat_id not in self.groups_config:
-            return []
-        return self.groups_config[chat_id].get('domains', [])
+        return self.config_manager.get_domains()
 
-    def add_domain_to_group(self, chat_id: str, domain: str) -> tuple:
-        """向指定群组添加域名
+    def add_domain(self, domain: str) -> tuple:
+        """添加域名
 
         Args:
-            chat_id: 群组ID
             domain: 域名
 
         Returns:
             tuple: (成功标志, 消息)
         """
-        if chat_id not in self.groups_config:
-            return False, "群组未配置"
+        return self.config_manager.add_domain(domain)
 
-        domains = self.groups_config[chat_id].get('domains', [])
-
-        if domain in domains:
-            return False, "域名已存在"
-
-        domains.append(domain)
-        self.groups_config[chat_id]['domains'] = domains
-        self.save_groups_config()
-        return True, f"成功添加域名: {domain}"
-
-    def remove_domain_from_group(self, chat_id: str, domain: str) -> tuple:
-        """从指定群组移除域名
+    def remove_domain(self, domain: str) -> tuple:
+        """移除域名
 
         Args:
-            chat_id: 群组ID
             domain: 域名
 
         Returns:
             tuple: (成功标志, 消息)
         """
-        if chat_id not in self.groups_config:
-            return False, "群组未配置"
-
-        domains = self.groups_config[chat_id].get('domains', [])
-
-        if domain not in domains:
-            return False, "域名不存在"
-
-        domains.remove(domain)
-        self.groups_config[chat_id]['domains'] = domains
-        self.save_groups_config()
-        return True, f"成功删除域名: {domain}"
-
-    def save_groups_config(self):
-        """保存群组配置到配置文件"""
-        self.config_manager.set('telegram.groups', self.groups_config)
-        self.config_manager.save_config()
+        return self.config_manager.remove_domain(domain)
     
     async def process_update(self, update: dict) -> None:
         """处理单个更新"""
@@ -398,7 +358,7 @@ class TelegramBot:
                                 '/cfexport', '/cfexportall', '/cfsync']
 
                 if command in admin_commands:
-                    if not self.is_authorized_for_group(user_id, username, chat_id):
+                    if not self.is_authorized(user_id, username):
                         await self.send_message(
                             "❌ 您没有权限执行此命令\n\n"
                             "需要管理员权限的命令，请联系管理员",
@@ -478,7 +438,7 @@ class TelegramBot:
         http_config = self.config_manager.get('http_api', {})
         cf_tokens = self.config_manager.config.get('cloudflare_tokens', {}).get('users', {})
         # 获取当前群组的域名
-        domains = self.get_group_domains(chat_id)
+        domains = self.get_domains()
 
         # 计算用户CF Token数量
         user_cf_tokens = len(cf_tokens.get(str(user_id), {}).get('tokens', [])) if hasattr(self, 'user_id') else 0
@@ -586,7 +546,7 @@ class TelegramBot:
     async def cmd_status(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """状态命令"""
         # 使用当前群组的域名
-        domains = self.get_group_domains(chat_id)
+        domains = self.get_domains()
         interval = self.config_manager.get('check.interval_minutes')
         
         # 构建基础状态信息
@@ -670,7 +630,7 @@ class TelegramBot:
     
     async def cmd_list_domains(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """列出域名命令"""
-        domains = self.get_group_domains(chat_id)
+        domains = self.get_domains()
         
         if not domains:
             await self.send_message(
@@ -732,7 +692,7 @@ class TelegramBot:
         for url in urls:
             url = url.strip()
             if url:
-                success, message = self.add_domain_to_group(chat_id, url)
+                success, message = self.add_domain(url)
                 if success:
                     success_list.append(url)
                 else:
@@ -749,7 +709,7 @@ class TelegramBot:
                 response += f"  • {item}\n"
 
         if response:
-            domains_count = len(self.get_group_domains(chat_id))
+            domains_count = len(self.get_domains())
             response += f"\n📋 当前群组共监控 **{domains_count}** 个域名"
             await self.send_message(response, reply_to=msg_id, chat_id=chat_id)
         else:
@@ -778,7 +738,7 @@ class TelegramBot:
         for url in urls:
             url = url.strip()
             if url:
-                success, message = self.remove_domain_from_group(chat_id, url)
+                success, message = self.remove_domain(url)
                 if success:
                     success_list.append(url)
                 else:
@@ -797,7 +757,7 @@ class TelegramBot:
                 response += f"  • {item}\n"
 
         if response:
-            domains_count = len(self.get_group_domains(chat_id))
+            domains_count = len(self.get_domains())
             response += f"\n📋 当前群组剩余 **{domains_count}** 个域名"
             await self.send_message(response, reply_to=msg_id, chat_id=chat_id)
         else:
@@ -805,14 +765,8 @@ class TelegramBot:
     
     async def cmd_clear_domains(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """清空域名命令"""
-        # 清空当前群组的所有域名
-        if chat_id not in self.groups_config:
-            await self.send_message("❌ 群组未配置", reply_to=msg_id, chat_id=chat_id)
-            return
-
-        self.groups_config[chat_id]['domains'] = []
-        self.save_groups_config()
-        success, message = True, "已清空当前群组的所有域名"
+        # 清空所有域名
+        success, message = self.config_manager.clear_domains()
         
         if success:
             await self.send_message(f"✅ {message}", reply_to=msg_id, chat_id=chat_id)
@@ -1016,59 +970,31 @@ class TelegramBot:
         action = parts[0].lower()
         
         if action == "list":
-            # 获取当前群组的管理员
-            if chat_id not in self.groups_config:
-                await self.send_message("❌ 群组未配置", reply_to=msg_id, chat_id=chat_id)
-                return
-
-            group_admins = self.groups_config[chat_id].get('admins', [])
-            global_admins = self.config_manager.get('telegram.admin_users', [])
-
-            all_admins_text = ""
-            if group_admins:
-                group_list = "\n".join([f"• `{admin}`" for admin in group_admins])
-                all_admins_text += f"**当前群组管理员**:\n{group_list}\n\n"
-
-            if global_admins:
-                global_list = "\n".join([f"• `{admin}`" for admin in global_admins])
-                all_admins_text += f"**全局管理员**:\n{global_list}"
-
-            if not all_admins_text:
+            # 显示管理员列表
+            if not self.admin_users:
                 await self.send_message("📝 当前没有设置任何管理员\n\n所有人都可以执行命令", reply_to=msg_id, chat_id=chat_id)
             else:
-                await self.send_message(f"👥 **管理员列表**:\n\n{all_admins_text}", reply_to=msg_id, chat_id=chat_id)
+                admin_list = "\n".join([f"• `{admin}`" for admin in self.admin_users])
+                await self.send_message(f"👥 **管理员列表**:\n\n{admin_list}", reply_to=msg_id, chat_id=chat_id)
         
         elif action in ["add", "remove"]:
             if len(parts) < 2:
                 await self.send_message("❌ 请提供用户名\n\n示例: `/admin add @username`", reply_to=msg_id, chat_id=chat_id)
                 return
-            
-            target_username = parts[1].lstrip('@')  # 移除@符号
 
-            # 检查群组配置
-            if chat_id not in self.groups_config:
-                await self.send_message("❌ 群组未配置", reply_to=msg_id, chat_id=chat_id)
-                return
-
-            group_admins = self.groups_config[chat_id].get('admins', [])
+            target_username = parts[1]  # 保留@符号
 
             if action == "add":
-                if target_username in group_admins:
-                    success, message = False, f"用户 @{target_username} 已经是群组管理员"
-                else:
-                    group_admins.append(target_username)
-                    self.groups_config[chat_id]['admins'] = group_admins
-                    self.save_groups_config()
-                    success, message = True, f"已添加 @{target_username} 为群组管理员"
+                success, message = self.config_manager.add_admin_by_username(target_username)
+                if success:
+                    # 更新本地缓存
+                    self.admin_users = self.config_manager.get('telegram.admin_users', [])
             else:  # remove
-                if target_username not in group_admins:
-                    success, message = False, f"用户 @{target_username} 不是群组管理员"
-                else:
-                    group_admins.remove(target_username)
-                    self.groups_config[chat_id]['admins'] = group_admins
-                    self.save_groups_config()
-                    success, message = True, f"已移除 @{target_username} 的群组管理员权限"
-            
+                success, message = self.config_manager.remove_admin_by_username(target_username)
+                if success:
+                    # 更新本地缓存
+                    self.admin_users = self.config_manager.get('telegram.admin_users', [])
+
             if success:
                 await self.send_message(f"✅ {message}", reply_to=msg_id, chat_id=chat_id)
             else:

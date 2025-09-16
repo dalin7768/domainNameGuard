@@ -18,12 +18,12 @@
 - **多格式导出** - 支持txt、json、csv格式域名导出
 
 ### 📱 Telegram Bot
-- **多群组支持** - 一个Bot可以同时在多个群组工作
-- **群组隔离** - 每个群组独立管理域名和权限
-- **实时通知** - 域名状态变化即时通知，结果按群组分发
+- **多项目支持** - 支持为不同项目部署独立的监控实例
+- **实时通知** - 域名状态变化即时通知
 - **远程控制** - 通过Telegram命令管理整个监控系统
 - **热配置更新** - 大部分配置支持在线修改，无需重启
 - **智能通知模式** - 支持完整模式和智能模式通知
+- **权限管理** - 支持管理员权限控制
 
 ### 🛡️ 生产特性
 - **多种部署方式** - 支持systemd/Docker/PM2部署
@@ -84,11 +84,11 @@ python src/main.py
 
 #### 生产环境部署
 
-**Linux 单群组部署：**
+**Linux 单实例部署：**
 ```bash
 chmod +x deploy.sh
 
-# 部署单个实例
+# 部署单个实例（使用默认config.json）
 ./deploy.sh deploy main
 
 # 查看状态
@@ -101,44 +101,26 @@ chmod +x deploy.sh
 ./deploy.sh restart main
 ```
 
-**Linux 多群组部署（推荐）：**
+**Linux 多项目部署：**
 ```bash
-# 1. 创建多群组配置
-cp config-multigroup.json config-production.json
-# 编辑 config-production.json 填入真实配置
+# 1. 为每个项目创建配置文件
+cp config_example.json config-project-a.json
+cp config_example.json config-project-b.json
 
-# 2. 部署多群组服务
-./deploy.sh deploy multigroup config-production.json
+# 2. 编辑配置文件，填入不同的：
+#    - telegram.chat_id（不同群组ID）
+#    - domains（或domains文件路径）
+#    - logging.file（不同日志文件）
 
-# 3. 查看服务状态
-./deploy.sh status
+# 3. 部署多个项目实例
+./deploy.sh deploy project-a config-project-a.json
+./deploy.sh deploy project-b config-project-b.json
 
-# 4. 查看日志
-./deploy.sh logs multigroup
-
-# 5. 停止服务
-./deploy.sh stop multigroup
-```
-
-**多群组部署管理命令：**
-```bash
-# 部署指定配置的多群组服务
-./deploy.sh deploy <实例名> [配置文件]
-
-# 查看所有实例状态
-./deploy.sh status
-
-# 停止所有实例
-./deploy.sh stop-all
-
-# 重启指定实例
-./deploy.sh restart <实例名>
-
-# 查看实例日志
-./deploy.sh logs <实例名>
-
-# 删除实例
-./deploy.sh remove <实例名>
+# 4. 管理所有实例
+./deploy.sh status           # 查看所有实例状态
+./deploy.sh logs project-a   # 查看特定实例日志
+./deploy.sh restart project-b # 重启特定实例
+./deploy.sh stop-all        # 停止所有实例
 ```
 
 **Windows 一键部署：**
@@ -773,124 +755,162 @@ MIT License - 详见 LICENSE 文件
 
 ---
 
-## 🏠 多群组配置
+## 🏢 多项目部署配置
 
-支持一个Bot在多个群组中工作，每个群组独立管理域名：
+支持为不同项目部署独立的监控实例，每个项目使用独立的配置文件和Telegram群组：
 
+**项目A配置文件 `config-project-a.json`：**
 ```json
 {
+  "domains": [
+    "project-a-main.com",
+    "project-a-api.com",
+    "project-a-cdn.com"
+  ],
   "telegram": {
     "bot_token": "YOUR_BOT_TOKEN",
-    "groups": {
-      "-1001111111111": {
-        "name": "项目A监控群",
-        "domains": ["project-a.com", "api-a.com"],
-        "admins": ["admin_a"]
-      },
-      "-1002222222222": {
-        "name": "项目B监控群",
-        "domains": ["project-b.com", "api-b.com"],
-        "admins": ["admin_b"]
-      }
-    }
+    "chat_id": "-1001111111111",
+    "admin_users": ["admin_a", "manager_a"]
+  },
+  "logging": {
+    "file": "domain_monitor_project_a.log"
+  }
+}
+```
+
+**项目B配置文件 `config-project-b.json`：**
+```json
+{
+  "domains": [
+    "project-b-main.com",
+    "project-b-api.com",
+    "project-b-admin.com"
+  ],
+  "telegram": {
+    "bot_token": "YOUR_BOT_TOKEN",
+    "chat_id": "-1002222222222",
+    "admin_users": ["admin_b", "manager_b"]
+  },
+  "logging": {
+    "file": "domain_monitor_project_b.log"
   }
 }
 ```
 
 **优势：**
-- 🏠 群组隔离：每个群组只管理自己的域名
-- ⚡ 统一监控：所有域名一次检查，结果分组发送
-- 👥 权限分离：群组管理员vs全局管理员
-- 🚫 解决冲突：避免多实例Bot轮询冲突
+- 🏠 **完全隔离**：每个项目独立运行，互不影响
+- 📁 **简洁配置**：使用标准的config.json结构，无需复杂配置
+- ⚡ **独立监控**：每个项目按自己的配置独立监控
+- 👥 **权限分离**：每个项目有独立的管理员
+- 🚫 **无冲突**：使用相同Bot Token但不同chat_id，不会冲突
+- 📊 **独立日志**：每个项目有独立的日志文件
 
 **使用方法：**
-1. 复制 `config-multigroup.json` 到 `config.json`
-2. 填入真实的 `bot_token` 和群组ID
-3. 配置每个群组的域名和管理员
-4. 启动服务：`python src/main.py`
+1. 为每个项目复制 `config_example.json`
+2. 修改配置文件中的关键设置：
+   - `domains` - 项目的域名列表
+   - `telegram.chat_id` - 项目群组ID
+   - `telegram.admin_users` - 项目管理员
+   - `logging.file` - 独立的日志文件
+3. 使用部署脚本启动多个实例
+
+**文件结构示例：**
+```
+domain-monitor/
+├── config-project-a.json       # 项目A配置
+├── config-project-b.json       # 项目B配置
+├── config-project-c.json       # 项目C配置
+├── domains-project-a.json      # 项目A域名文件（可选）
+├── domains-project-b.json      # 项目B域名文件（可选）
+├── domain_monitor_project_a.log # 项目A日志
+├── domain_monitor_project_b.log # 项目B日志
+└── src/                        # 程序源码
+```
 
 **获取群组ID方法：**
 1. 将 `@userinfobot` 添加到群组，发送消息获取群组ID
 2. 或启动程序后在群组发消息，查看日志中的 `chat_id`
 
-**使用场景示例：**
-- **项目A群组**：管理 `app-a.com`, `api-a.com` 等域名，只有项目A团队能管理
-- **项目B群组**：管理 `app-b.com`, `api-b.com` 等域名，只有项目B团队能管理
-- **运维总群**：全局管理员可以在任意群组执行所有命令
-
-**工作流程：**
-1. `/check` 命令检查所有群组的域名
-2. 检查结果自动分发到相关群组
-3. 每个群组只看到自己域名的监控结果
-4. 各群组独立管理域名和权限，互不干扰
-
 ---
 
-## 🚨 多群组故障排除
+## 🚨 多项目部署故障排除
 
 ### 常见问题
 
-**Q: 多群组命令没有响应？**
+**Q: 多个实例Bot冲突？**
 ```bash
-# 检查群组ID格式（必须是负数）
-grep -E "groups|chat_id" config.json
+# 检查各实例的chat_id是否不同
+grep -h "chat_id" config-*.json
 
-# 查看启动日志，确认群组加载成功
-tail -f domain_monitor.log | grep -E "群组|初始化"
-
-# 检查Bot权限
-# 确保Bot在所有配置的群组中都有发送消息权限
+# 确保每个实例使用不同的群组ID
+# 同一个Bot Token可以在不同群组工作，不会冲突
 ```
 
-**Q: 显示"群组未配置"错误？**
+**Q: 实例启动失败？**
 ```bash
-# 1. 确认群组ID在config.json的groups中存在
-# 2. 重启服务让配置生效：./deploy.sh restart
-# 3. 检查配置文件格式：python -m json.tool config.json
+# 1. 检查配置文件格式
+python -m json.tool config-project-a.json
+
+# 2. 查看实例日志
+./deploy.sh logs project-a
+
+# 3. 检查端口占用（如果启用HTTP API）
+netstat -tlnp | grep 8080
+```
+
+**Q: 域名文件读取失败？**
+```bash
+# 1. 检查域名文件是否存在
+ls -la domains-*.json
+
+# 2. 检查域名文件格式
+python -m json.tool domains-project-a.json
+
+# 3. 确认config中的domains配置
+grep -A 3 -B 1 "domains" config-project-a.json
 ```
 
 **Q: 权限管理不生效？**
 ```bash
-# 1. 确认用户名在群组admins列表中（不需要@符号）
-# 2. 检查全局管理员配置：telegram.admin_users
-# 3. 查看权限检查日志：grep -E "权限|authorized" domain_monitor.log
+# 检查管理员配置（用户名不需要@符号）
+grep -A 3 "admin_users" config-project-a.json
+
+# 查看权限相关日志
+grep -E "权限|authorized" domain_monitor_project_a.log
 ```
 
 ### 调试命令
 
 ```bash
-# 查看多群组运行状态
+# 查看所有实例状态
 ./deploy.sh status
 
-# 查看详细日志
-./deploy.sh logs [实例名]
+# 查看特定实例日志
+./deploy.sh logs project-a
 
-# 检查配置文件
-python -c "import json; print('配置正确' if json.load(open('config.json')) else '配置错误')"
+# 检查实例配置文件
+python -c "import json; print('配置正确' if json.load(open('config-project-a.json')) else '配置错误')"
 
-# 测试群组配置
-# 在各群组发送 /help 检查是否显示不同配置
+# 测试特定实例
+python src/main.py --config config-project-a.json
 ```
 
-### 从单群组迁移到多群组
+### 创建新项目实例
 
 ```bash
-# 1. 备份现有配置
-cp config.json config-backup.json
+# 1. 复制配置模板
+cp config_example.json config-new-project.json
 
-# 2. 创建多群组配置
-cp config-multigroup.json config.json
+# 2. 编辑配置文件
+nano config-new-project.json
+# 修改：domains、telegram.chat_id、telegram.admin_users、logging.file
 
-# 3. 迁移域名和配置
-# 手动编辑config.json，将原来的domains和telegram.chat_id
-# 转移到groups配置中
+# 3. 部署新实例
+./deploy.sh deploy new-project config-new-project.json
 
-# 4. 测试新配置
-python src/main.py --config config.json
-
-# 5. 生产部署
-./deploy.sh stop-all
-./deploy.sh deploy multigroup config.json
+# 4. 验证运行状态
+./deploy.sh status
+./deploy.sh logs new-project
 ```
 
 ---
