@@ -1,0 +1,60 @@
+{
+  "telegram": {
+    "bot_token": "YOUR_BOT_TOKEN",
+    "groups": {
+      "-1001234567890": {
+        "name": "项目A监控群",
+        "domains": [
+          "projecta-site1.com",
+          "projecta-site2.com",
+          "projecta-api.com"
+        ],
+        "admins": ["admin_userA", "manager_user1"]
+      },
+      "-1001234567891": {
+        "name": "项目B监控群",
+        "domains": [
+          "projectb-main.com",
+          "projectb-api.com",
+          "projectb-cdn.com"
+        ],
+        "admins": ["admin_userB", "manager_user2"]
+      }
+    }
+  },
+  "check": {
+    "interval_minutes": 30,
+    "timeout_seconds": 10,
+    "retry_count": 2,
+    "max_concurrent": 20,
+    "auto_adjust_concurrent": true,
+    "batch_notify": false,
+    "show_eta": true
+  },
+  "notification": {
+    "level": "smart",
+    "failure_threshold": 2
+  },
+  "history": {
+    "enabled": true,
+    "retention_days": 30
+  },
+  "daily_report": {
+    "enabled": true,
+    "time": "09:00"
+  },
+  "http_api": {
+    "enabled": false,
+    "port": 8080,
+    "auth": {
+      "enabled": false,
+      "api_key": ""
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "file": "domain_monitor.log",
+    "max_size_mb": 10,
+    "backup_count": 5
+  }
+}

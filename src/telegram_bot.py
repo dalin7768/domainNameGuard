@@ -20,7 +20,13 @@ class TelegramBot:
         """
         self.config_manager = config_manager
         self.bot_token = config_manager.get('telegram.bot_token')
-        self.chat_id = config_manager.get('telegram.chat_id')
+        # 支持多群组：获取群组配置
+        self.groups_config = config_manager.get('telegram.groups', {})
+        # 兼容旧版单群组配置
+        single_chat_id = config_manager.get('telegram.chat_id')
+        if single_chat_id and not self.groups_config:
+            self.groups_config = {single_chat_id: {"domains": config_manager.get_domains(), "admins": config_manager.get('telegram.admin_users', [])}}
+
         self.logger = logging.getLogger(__name__)
 
         # Cloudflare管理器
@@ -120,12 +126,19 @@ class TelegramBot:
         if error_tracker:
             self.error_tracker_callback = error_tracker
     
-    async def send_message(self, text: str, parse_mode: str = "Markdown", 
-                          reply_to: Optional[int] = None) -> bool:
+    async def send_message(self, text: str, parse_mode: str = "Markdown",
+                          reply_to: Optional[int] = None, chat_id: Optional[str] = None) -> bool:
         """发送消息"""
         try:
+            # 如果没有指定chat_id，使用第一个配置的群组ID（兼容旧版）
+            target_chat_id = chat_id or next(iter(self.groups_config.keys())) if self.groups_config else None
+
+            if not target_chat_id:
+                self.logger.error("没有配置任何群组")
+                return False
+
             params = {
-                "chat_id": self.chat_id,
+                "chat_id": target_chat_id,
                 "text": text,
                 "parse_mode": parse_mode,
                 "disable_web_page_preview": True
@@ -213,16 +226,104 @@ class TelegramBot:
             return []
     
     def is_authorized(self, user_id: int, username: str = None) -> bool:
-        """检查用户是否有权限
-        
+        """检查用户是否有权限（兼容旧版）
+
         Args:
             user_id: 用户ID（已弃用）
             username: 用户名
-        
+
         Returns:
             bool: 是否有权限
         """
         return self.config_manager.is_admin_by_username(username)
+
+    def is_authorized_for_group(self, user_id: int, username: str, chat_id: str) -> bool:
+        """检查用户是否有指定群组的管理权限
+
+        Args:
+            user_id: 用户ID
+            username: 用户名
+            chat_id: 群组ID
+
+        Returns:
+            bool: 是否有权限
+        """
+        if chat_id not in self.groups_config:
+            return False
+
+        group_config = self.groups_config[chat_id]
+        group_admins = group_config.get('admins', [])
+
+        # 检查用户名是否在该群组的管理员列表中
+        if username and username in group_admins:
+            return True
+
+        # 兼容：检查是否是全局管理员
+        return self.config_manager.is_admin_by_username(username)
+
+    def get_group_domains(self, chat_id: str) -> list:
+        """获取指定群组的域名列表
+
+        Args:
+            chat_id: 群组ID
+
+        Returns:
+            list: 域名列表
+        """
+        if chat_id not in self.groups_config:
+            return []
+        return self.groups_config[chat_id].get('domains', [])
+
+    def add_domain_to_group(self, chat_id: str, domain: str) -> tuple:
+        """向指定群组添加域名
+
+        Args:
+            chat_id: 群组ID
+            domain: 域名
+
+        Returns:
+            tuple: (成功标志, 消息)
+        """
+        if chat_id not in self.groups_config:
+            return False, "群组未配置"
+
+        domains = self.groups_config[chat_id].get('domains', [])
+
+        if domain in domains:
+            return False, "域名已存在"
+
+        domains.append(domain)
+        self.groups_config[chat_id]['domains'] = domains
+        self.save_groups_config()
+        return True, f"成功添加域名: {domain}"
+
+    def remove_domain_from_group(self, chat_id: str, domain: str) -> tuple:
+        """从指定群组移除域名
+
+        Args:
+            chat_id: 群组ID
+            domain: 域名
+
+        Returns:
+            tuple: (成功标志, 消息)
+        """
+        if chat_id not in self.groups_config:
+            return False, "群组未配置"
+
+        domains = self.groups_config[chat_id].get('domains', [])
+
+        if domain not in domains:
+            return False, "域名不存在"
+
+        domains.remove(domain)
+        self.groups_config[chat_id]['domains'] = domains
+        self.save_groups_config()
+        return True, f"成功删除域名: {domain}"
+
+    def save_groups_config(self):
+        """保存群组配置到配置文件"""
+        self.config_manager.set('telegram.groups', self.groups_config)
+        self.config_manager.save_config()
     
     async def process_update(self, update: dict) -> None:
         """处理单个更新"""
@@ -252,9 +353,10 @@ class TelegramBot:
                 sorted_ids = sorted(self.processed_messages)
                 self.processed_messages = set(sorted_ids[-100:])
             
-            # 只处理群组消息
+            # 检查是否是配置的群组消息
             chat = message.get("chat", {})
-            if str(chat.get("id")) != self.chat_id:
+            chat_id = str(chat.get("id"))
+            if chat_id not in self.groups_config:
                 return
             
             # 获取消息文本
@@ -288,11 +390,12 @@ class TelegramBot:
                                 '/cfexport', '/cfexportall', '/cfsync']
 
                 if command in admin_commands:
-                    if not self.is_authorized(user_id, username):
+                    if not self.is_authorized_for_group(user_id, username, chat_id):
                         await self.send_message(
                             "❌ 您没有权限执行此命令\n\n"
                             "需要管理员权限的命令，请联系管理员",
-                            reply_to=message_id
+                            reply_to=message_id,
+                            chat_id=chat_id
                         )
                         return
                 
@@ -316,8 +419,8 @@ class TelegramBot:
                         if command in blocking_commands:
                             self.executing_commands.add(command)
 
-                        # 执行命令
-                        await self.commands[command](args, message_id, user_id, username)
+                        # 执行命令，传递群组ID
+                        await self.commands[command](args, message_id, user_id, username, chat_id)
 
                     except Exception as e:
                         # 命令执行出错时发送错误消息给用户
@@ -349,15 +452,16 @@ class TelegramBot:
             self.logger.error(f"处理更新时出错: {e}")
     
     # 命令处理函数
-    async def cmd_help(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_help(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """帮助和配置命令"""
         # 获取当前配置信息
         check_config = self.config_manager.get('check', {})
         notification_config = self.config_manager.get('notification', {})
         http_config = self.config_manager.get('http_api', {})
         cf_tokens = self.config_manager.config.get('cloudflare_tokens', {}).get('users', {})
-        domains = self.config_manager.get_domains()
-        
+        # 获取当前群组的域名
+        domains = self.get_group_domains(chat_id)
+
         # 计算用户CF Token数量
         user_cf_tokens = len(cf_tokens.get(str(user_id), {}).get('tokens', [])) if hasattr(self, 'user_id') else 0
         
@@ -370,7 +474,8 @@ class TelegramBot:
         
         help_text = f"""📚 **域名监控机器人帮助**
 
-⚙️ **当前配置**:
+⚙️ **当前群组配置**:
+• 群组ID: `{chat_id}`
 • 监控域名: {len(domains)} 个
 • 检查间隔: {check_config.get('interval_minutes', 30)} 分钟  
 • 超时时间: {check_config.get('timeout_seconds', 10)} 秒
@@ -436,9 +541,10 @@ class TelegramBot:
 • 支持批量操作，用空格或逗号分隔
 • 域名无需 http:// 前缀
 • 支持 WebSocket (wss://) 域名
+• 每个群组独立管理域名
 • 配置修改立即生效，无需重启"""
-        
-        await self.send_message(help_text, reply_to=msg_id)
+
+        await self.send_message(help_text, reply_to=msg_id, chat_id=chat_id)
     
     async def cmd_start(self, args: str, msg_id: int, user_id: int, username: str):
         """启动命令"""
@@ -543,9 +649,9 @@ class TelegramBot:
         
         await self.send_message(status_text, reply_to=msg_id)
     
-    async def cmd_list_domains(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_list_domains(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """列出域名命令"""
-        domains = self.config_manager.get_domains()
+        domains = self.get_group_domains(chat_id)
         
         if not domains:
             await self.send_message(
@@ -581,10 +687,10 @@ class TelegramBot:
             text += f"\n\n⚠️ **发现 {duplicate_count} 个重复域名**"
             text += f"\n实际唯一域名数: {len(unique_domains)} 个"
         
-        await self.send_long_message(text, reply_to=msg_id)
+        await self.send_long_message(text, reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_add_domain(self, args: str, msg_id: int, user_id: int, username: str):
-        """添加域名命令（支持批量）"""
+    async def cmd_add_domain(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
+        """添加域名命令（支持批量）- 多群组版本"""
         if not args:
             await self.send_message(
                 "❌ 请提供要添加的域名\n\n"
@@ -592,87 +698,91 @@ class TelegramBot:
                 "`/add example.com`\n"
                 "`/add google.com baidu.com`\n"
                 "`/add example1.com example2.com example3.com`\n\n"
-                "⚠️ 不需要添加 http:// 前缀",
-                reply_to=msg_id
+                "⚠️ 不需要添加 http:// 前缀\n"
+                "🏠 域名将添加到当前群组",
+                reply_to=msg_id,
+                chat_id=chat_id
             )
             return
-        
+
         # 支持批量添加（空格或逗号分隔）
         urls = args.replace(',', ' ').split()
         success_list = []
         fail_list = []
-        
+
         for url in urls:
             url = url.strip()
             if url:
-                success, message = self.config_manager.add_domain(url)
+                success, message = self.add_domain_to_group(chat_id, url)
                 if success:
                     success_list.append(url)
                 else:
-                    fail_list.append(f"{url} ({message.split(':')[-1].strip()})")
-        
+                    fail_list.append(f"{url} ({message})")
+
         # 构建响应消息
         response = ""
         if success_list:
             response += f"✅ **成功添加 {len(success_list)} 个域名**\n"
-        
+
         if fail_list:
             response += f"\n❌ **失败 {len(fail_list)} 个**:\n"
             for item in fail_list:
                 response += f"  • {item}\n"
-        
+
         if response:
-            domains_count = len(self.config_manager.get_domains())
-            response += f"\n📋 当前共监控 **{domains_count}** 个域名"
-            await self.send_message(response, reply_to=msg_id)
+            domains_count = len(self.get_group_domains(chat_id))
+            response += f"\n📋 当前群组共监控 **{domains_count}** 个域名"
+            await self.send_message(response, reply_to=msg_id, chat_id=chat_id)
         else:
-            await self.send_message("❌ 没有有效的域名", reply_to=msg_id)
+            await self.send_message("❌ 没有有效的域名", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_remove_domain(self, args: str, msg_id: int, user_id: int, username: str):
-        """删除域名命令（支持批量）"""
+    async def cmd_remove_domain(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
+        """删除域名命令（支持批量）- 多群组版本"""
         if not args:
             await self.send_message(
                 "❌ 请提供要删除的域名\n\n"
                 "💡 **使用示例**:\n"
                 "`/remove example.com`\n"
                 "`/remove google.com baidu.com`\n"
-                "`/remove example1.com example2.com`",
-                reply_to=msg_id
+                "`/remove example1.com example2.com`\n\n"
+                "🏠 将从当前群组中删除域名",
+                reply_to=msg_id,
+                chat_id=chat_id
             )
             return
-        
+
         # 支持批量删除
         urls = args.replace(',', ' ').split()
         success_list = []
         fail_list = []
-        
+
         for url in urls:
             url = url.strip()
             if url:
-                success, message = self.config_manager.remove_domain(url)
+                success, message = self.remove_domain_from_group(chat_id, url)
                 if success:
                     success_list.append(url)
                 else:
-                    fail_list.append(f"{url} (不存在)")
-        
+                    fail_list.append(f"{url} ({message})")
+
         # 构建响应消息
         response = ""
         if success_list:
             response += f"❌ **成功删除 {len(success_list)} 个域名**:\n"
             for url in success_list:
                 response += f"  • {url}\n"
-        
+
         if fail_list:
             response += f"\n⚠️ **未找到 {len(fail_list)} 个**:\n"
             for item in fail_list:
                 response += f"  • {item}\n"
-        
+
         if response:
-            domains_count = len(self.config_manager.get_domains())
-            response += f"\n📋 当前剩余 **{domains_count}** 个域名"
-            await self.send_message(response, reply_to=msg_id)
+            domains_count = len(self.get_group_domains(chat_id))
+            response += f"\n📋 当前群组剩余 **{domains_count}** 个域名"
+            await self.send_message(response, reply_to=msg_id, chat_id=chat_id)
         else:
-            await self.send_message("❌ 没有有效的域名", reply_to=msg_id)
+            await self.send_message("❌ 没有有效的域名", reply_to=msg_id, chat_id=chat_id)
     
     async def cmd_clear_domains(self, args: str, msg_id: int, user_id: int, username: str):
         """清空域名命令"""

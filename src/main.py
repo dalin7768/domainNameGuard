@@ -248,8 +248,26 @@ class DomainMonitor:
         
         try:
             # 重要：每次检查前重新加载配置
-            # 这样通过 Telegram 命令修改的配置会立即生效
-            domains = self.config_manager.get_domains()
+            # 获取所有群组的域名进行合并监控
+            all_domains = []
+            groups_domains_map = {}  # 存储每个群组对应的域名
+
+            if hasattr(self.bot, 'groups_config') and self.bot.groups_config:
+                # 多群组模式：合并所有群组的域名
+                for chat_id, group_config in self.bot.groups_config.items():
+                    group_domains = group_config.get('domains', [])
+                    groups_domains_map[chat_id] = group_domains
+                    all_domains.extend(group_domains)
+            else:
+                # 兼容旧版单群组模式
+                all_domains = self.config_manager.get_domains()
+                # 为兼容性创建映射
+                if all_domains:
+                    chat_id = next(iter(self.bot.groups_config.keys())) if self.bot.groups_config else None
+                    if chat_id:
+                        groups_domains_map[chat_id] = all_domains
+
+            domains = all_domains
             
             # 添加详细日志
             self.logger.info(f"从配置获取到 {len(domains)} 个域名")
@@ -450,39 +468,79 @@ class DomainMonitor:
                 should_notify = len(new_errors) > 0 or len(recovered) > 0
                 results_to_notify = new_errors + recovered
             
-            # 如果不是批次通知模式，或需要最终汇总，发送总体通知
-            self.logger.info(f"通知判断 - batch_notify: {batch_notify}, should_notify: {should_notify}")
-            if not batch_notify and should_notify:
-                # 根据通知级别设置quiet_on_success
-                quiet_on_success_setting = notify_level == 'error'  # 只有error模式在全部成功时静默
-                self.logger.info(f"准备发送通知 - 级别: {notify_level}, 手动: {is_manual}, quiet_on_success: {quiet_on_success_setting}")
-                
-                await self.notifier.notify_failures(
-                    results_to_notify if notify_level == 'smart' and not is_manual else results,
-                    quiet_on_success=quiet_on_success_setting,
-                    is_manual=is_manual,
-                    next_run_time=next_run_time,
-                    new_errors=new_errors if notify_level == 'smart' else None,
-                    recovered=recovered if notify_level == 'smart' else None,
-                    persistent_errors=persistent_errors if notify_level == 'smart' else None
-                )
-                self.logger.info("通知已发送")
+            # 多群组通知：为每个群组发送相关的检查结果
+            if groups_domains_map:
+                for chat_id, group_domains in groups_domains_map.items():
+                    if not group_domains:  # 跳过没有域名的群组
+                        continue
+
+                    # 筛选出这个群组相关的检查结果
+                    group_results = [r for r in results if r.domain_name in group_domains]
+                    if not group_results:
+                        continue
+
+                    # 筛选出这个群组的新错误和恢复
+                    group_new_errors = [e for e in new_errors if e.domain_name in group_domains] if new_errors else []
+                    group_recovered = [r for r in recovered if r.domain_name in group_domains] if recovered else []
+                    group_persistent_errors = [e for e in persistent_errors if e.domain_name in group_domains] if persistent_errors else []
+
+                    # 判断是否需要向这个群组发送通知
+                    if is_manual:
+                        group_should_notify = True
+                        group_results_to_notify = group_results
+                    elif notify_level == 'all':
+                        group_should_notify = True
+                        group_results_to_notify = group_results
+                    elif notify_level == 'error':
+                        group_failed_results = [r for r in group_results if not r.is_success]
+                        group_should_notify = len(group_failed_results) > 0
+                        group_results_to_notify = group_results
+                    elif notify_level == 'smart':
+                        group_should_notify = len(group_new_errors) > 0 or len(group_recovered) > 0
+                        group_results_to_notify = group_new_errors + group_recovered
+                    else:
+                        group_should_notify = len(group_new_errors) > 0 or len(group_recovered) > 0
+                        group_results_to_notify = group_new_errors + group_recovered
+
+                    # 发送群组通知
+                    if group_should_notify:
+                        quiet_on_success_setting = notify_level == 'error'
+
+                        # 创建群组特定的通知器实例
+                        group_notifier = TelegramNotifier(
+                            bot_token=self.notifier.bot_token,
+                            chat_id=chat_id
+                        )
+
+                        await group_notifier.notify_failures(
+                            group_results_to_notify if notify_level == 'smart' and not is_manual else group_results,
+                            quiet_on_success=quiet_on_success_setting,
+                            is_manual=is_manual,
+                            next_run_time=next_run_time,
+                            new_errors=group_new_errors if notify_level == 'smart' else None,
+                            recovered=group_recovered if notify_level == 'smart' else None,
+                            persistent_errors=group_persistent_errors if notify_level == 'smart' else None
+                        )
+
+                        self.logger.info(f"已向群组 {chat_id} 发送通知")
+
             else:
-                # 批次模式下只发送最终汇总（但仍需检查should_notify）
-                self.logger.info(f"批次模式 - should_notify: {should_notify}")
-                if should_notify:
-                    # 根据通知级别设置quiet_on_success
-                    batch_quiet_setting = notify_level == 'error'  # 只有error模式在全部成功时静默
-                    self.logger.info(f"批次模式准备发送通知 - 级别: {notify_level}, quiet_on_success: {batch_quiet_setting}")
-                    await self.notifier._send_check_summary(
-                        results, 
-                        quiet_on_success=batch_quiet_setting,
+                # 兼容旧版单群组逻辑
+                self.logger.info(f"通知判断 - batch_notify: {batch_notify}, should_notify: {should_notify}")
+                if not batch_notify and should_notify:
+                    quiet_on_success_setting = notify_level == 'error'
+                    self.logger.info(f"准备发送通知 - 级别: {notify_level}, 手动: {is_manual}, quiet_on_success: {quiet_on_success_setting}")
+
+                    await self.notifier.notify_failures(
+                        results_to_notify if notify_level == 'smart' and not is_manual else results,
+                        quiet_on_success=quiet_on_success_setting,
                         is_manual=is_manual,
-                        next_run_time=next_run_time
+                        next_run_time=next_run_time,
+                        new_errors=new_errors if notify_level == 'smart' else None,
+                        recovered=recovered if notify_level == 'smart' else None,
+                        persistent_errors=persistent_errors if notify_level == 'smart' else None
                     )
-                    self.logger.info("批次模式通知已发送")
-                else:
-                    self.logger.info("批次模式 - 根据通知级别，跳过发送通知")
+                    self.logger.info("通知已发送")
             
             # 输出统计信息
             success_count = sum(1 for r in results if r.is_success)
