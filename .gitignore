@@ -10,8 +10,10 @@ ENV/
 .venv
 
 # 配置文件（包含敏感信息）
+config-*.json
 config.json
 cloudflare_tokens.json
+domains-*.json
 domains.json
 error_history.json
 # 日志文件

@@ -6,12 +6,12 @@
   },
 
   "check": {
-    "interval_minutes": 20,
-    "max_concurrent": 10,
+    "interval_minutes": 120,
+    "max_concurrent": 100,
     "auto_adjust_concurrent": true,
-    "timeout_seconds": 10,
-    "retry_count": 2,
-    "retry_delay_seconds": 5,
+    "timeout_seconds": 20,
+    "retry_count": 1,
+    "retry_delay_seconds": 10,
     "batch_notify": false,
     "show_eta": true
   },

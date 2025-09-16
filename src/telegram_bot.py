@@ -49,6 +49,9 @@ class TelegramBot:
         
         # 运行标志
         self.is_running = True
+
+        # 当前聊天ID（用于兼容旧方法）
+        self.current_chat_id = None
         
         # 命令处理器映射
         self.commands: Dict[str, Callable] = {
@@ -130,8 +133,13 @@ class TelegramBot:
                           reply_to: Optional[int] = None, chat_id: Optional[str] = None) -> bool:
         """发送消息"""
         try:
-            # 如果没有指定chat_id，使用第一个配置的群组ID（兼容旧版）
-            target_chat_id = chat_id or next(iter(self.groups_config.keys())) if self.groups_config else None
+            # 确定目标聊天ID的优先级：
+            # 1. 明确指定的chat_id
+            # 2. 当前聊天ID（current_chat_id）
+            # 3. 第一个配置的群组ID（兼容旧版）
+            target_chat_id = (chat_id or
+                            getattr(self, 'current_chat_id', None) or
+                            next(iter(self.groups_config.keys())) if self.groups_config else None)
 
             if not target_chat_id:
                 self.logger.error("没有配置任何群组")
@@ -173,10 +181,10 @@ class TelegramBot:
             self.logger.error(f"发送消息时出错: {e}")
             return False
 
-    async def send_long_message(self, text: str, reply_to: Optional[int] = None, max_length: int = 4000):
+    async def send_long_message(self, text: str, reply_to: Optional[int] = None, chat_id: Optional[str] = None, max_length: int = 4000):
         """发送长消息，如果超过限制则分段发送"""
         if len(text) <= max_length:
-            await self.send_message(text, reply_to=reply_to)
+            await self.send_message(text, reply_to=reply_to, chat_id=chat_id)
             return
 
         # 分割消息
@@ -201,7 +209,7 @@ class TelegramBot:
         for i, part in enumerate(parts):
             # 为第一条消息添加reply_to，后续消息不用
             reply_to_use = reply_to if i == 0 else None
-            await self.send_message(part, reply_to=reply_to_use)
+            await self.send_message(part, reply_to=reply_to_use, chat_id=chat_id)
 
     async def get_updates(self) -> list:
         """获取新消息"""
@@ -419,8 +427,18 @@ class TelegramBot:
                         if command in blocking_commands:
                             self.executing_commands.add(command)
 
-                        # 执行命令，传递群组ID
-                        await self.commands[command](args, message_id, user_id, username, chat_id)
+                        # 临时设置当前聊天ID，方便兼容没有chat_id参数的旧方法
+                        self.current_chat_id = chat_id
+
+                        # 检查命令方法是否接受chat_id参数
+                        import inspect
+                        sig = inspect.signature(self.commands[command])
+                        if 'chat_id' in sig.parameters:
+                            # 新方法：传递chat_id参数
+                            await self.commands[command](args, message_id, user_id, username, chat_id)
+                        else:
+                            # 旧方法：不传递chat_id，使用current_chat_id
+                            await self.commands[command](args, message_id, user_id, username)
 
                     except Exception as e:
                         # 命令执行出错时发送错误消息给用户
@@ -546,7 +564,7 @@ class TelegramBot:
 
         await self.send_message(help_text, reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_start(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_start(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """启动命令"""
         welcome_text = f"""🚀 **域名监控机器人已启动**
 
@@ -563,11 +581,12 @@ class TelegramBot:
 
 💡 **提示**: 直接输入命令即可，不需要@机器人"""
         
-        await self.send_message(welcome_text, reply_to=msg_id)
+        await self.send_message(welcome_text, reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_status(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_status(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """状态命令"""
-        domains = self.config_manager.get_domains()
+        # 使用当前群组的域名
+        domains = self.get_group_domains(chat_id)
         interval = self.config_manager.get('check.interval_minutes')
         
         # 构建基础状态信息
@@ -646,8 +665,8 @@ class TelegramBot:
         status_text += "├ /list - 查看域名列表\n"
         status_text += "├ /check - 立即检查\n"
         status_text += "└ /help - 查看帮助和配置"
-        
-        await self.send_message(status_text, reply_to=msg_id)
+
+        await self.send_message(status_text, reply_to=msg_id, chat_id=chat_id)
     
     async def cmd_list_domains(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """列出域名命令"""
@@ -784,26 +803,33 @@ class TelegramBot:
         else:
             await self.send_message("❌ 没有有效的域名", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_clear_domains(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_clear_domains(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """清空域名命令"""
-        success, message = self.config_manager.clear_domains()
+        # 清空当前群组的所有域名
+        if chat_id not in self.groups_config:
+            await self.send_message("❌ 群组未配置", reply_to=msg_id, chat_id=chat_id)
+            return
+
+        self.groups_config[chat_id]['domains'] = []
+        self.save_groups_config()
+        success, message = True, "已清空当前群组的所有域名"
         
         if success:
-            await self.send_message(f"✅ {message}", reply_to=msg_id)
+            await self.send_message(f"✅ {message}", reply_to=msg_id, chat_id=chat_id)
         else:
-            await self.send_message(f"❌ {message}", reply_to=msg_id)
+            await self.send_message(f"❌ {message}", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_check_now(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_check_now(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """立即检查命令"""
         if not self.check_callback:
-            await self.send_message("❌ 检查功能未就绪", reply_to=msg_id)
+            await self.send_message("❌ 检查功能未就绪", reply_to=msg_id, chat_id=chat_id)
             return
         
         # 使用锁保护共享状态
         async with self._command_lock:
             # 检查是否已有检查正在进行
             if 'check' in self.executing_commands:
-                await self.send_message("⏳ 域名检查正在进行中，请等待完成后再试", reply_to=msg_id)
+                await self.send_message("⏳ 域名检查正在进行中，请等待完成后再试", reply_to=msg_id, chat_id=chat_id)
                 return
             
             # 标记检查开始
@@ -828,23 +854,23 @@ class TelegramBot:
             async with self._command_lock:
                 self.executing_commands.discard('check')
     
-    async def cmd_stop_check(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_stop_check(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """停止当前正在进行的检查"""
         async with self._command_lock:
             if 'check' not in self.executing_commands:
-                await self.send_message("ℹ️ 当前没有正在进行的域名检查", reply_to=msg_id)
+                await self.send_message("ℹ️ 当前没有正在进行的域名检查", reply_to=msg_id, chat_id=chat_id)
                 return
         
         if self.stop_check_callback:
             try:
                 await self.stop_check_callback()
-                await self.send_message("✅ 域名检查已停止", reply_to=msg_id)
+                await self.send_message("✅ 域名检查已停止", reply_to=msg_id, chat_id=chat_id)
             except Exception as e:
-                await self.send_message(f"❌ 停止检查时出错: {str(e)}", reply_to=msg_id)
+                await self.send_message(f"❌ 停止检查时出错: {str(e)}", reply_to=msg_id, chat_id=chat_id)
         else:
-            await self.send_message("❌ 停止检查功能未就绪", reply_to=msg_id)
+            await self.send_message("❌ 停止检查功能未就绪", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_show_config(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_show_config(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """显示当前配置"""
         try:
             config_info = []
@@ -879,16 +905,16 @@ class TelegramBot:
             cf_tokens = self.config_manager.config.get('cloudflare_tokens', {})
             config_info.append(f"☁️ Cloudflare 令牌: {len(cf_tokens)} 个")
             
-            await self.send_message("\n".join(config_info), reply_to=msg_id)
+            await self.send_message("\n".join(config_info), reply_to=msg_id, chat_id=chat_id)
             
         except Exception as e:
             self.logger.error(f"获取配置信息错误: {e}")
-            await self.send_message(f"❌ 获取配置失败: {str(e)}", reply_to=msg_id)
+            await self.send_message(f"❌ 获取配置失败: {str(e)}", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_set_interval(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_set_interval(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """设置检查间隔"""
         if not args:
-            await self.send_message("❌ 请提供间隔时间（分钟）\n\n示例: `/interval 10`", reply_to=msg_id)
+            await self.send_message("❌ 请提供间隔时间（分钟）\n\n示例: `/interval 10`", reply_to=msg_id, chat_id=chat_id)
             return
         
         try:
@@ -897,20 +923,20 @@ class TelegramBot:
             success, message = self.config_manager.set_interval(minutes)
             
             if success:
-                await self.send_message(f"✅ {message}", reply_to=msg_id)
+                await self.send_message(f"✅ {message}", reply_to=msg_id, chat_id=chat_id)
                 
                 # 如果间隔改变了，触发配置重新加载以立即生效
                 if old_interval != minutes and self.reload_callback:
                     await self.reload_callback()
             else:
-                await self.send_message(f"❌ {message}", reply_to=msg_id)
+                await self.send_message(f"❌ {message}", reply_to=msg_id, chat_id=chat_id)
         except ValueError:
-            await self.send_message("❌ 请输入有效的数字", reply_to=msg_id)
+            await self.send_message("❌ 请输入有效的数字", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_set_timeout(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_set_timeout(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """设置超时时间"""
         if not args:
-            await self.send_message("❌ 请提供超时时间（秒）\n\n示例: `/timeout 10`", reply_to=msg_id)
+            await self.send_message("❌ 请提供超时时间（秒）\n\n示例: `/timeout 10`", reply_to=msg_id, chat_id=chat_id)
             return
         
         try:
@@ -918,16 +944,16 @@ class TelegramBot:
             success, message = self.config_manager.set_timeout(seconds)
             
             if success:
-                await self.send_message(f"✅ {message}", reply_to=msg_id)
+                await self.send_message(f"✅ {message}", reply_to=msg_id, chat_id=chat_id)
             else:
-                await self.send_message(f"❌ {message}", reply_to=msg_id)
+                await self.send_message(f"❌ {message}", reply_to=msg_id, chat_id=chat_id)
         except ValueError:
-            await self.send_message("❌ 请输入有效的数字", reply_to=msg_id)
+            await self.send_message("❌ 请输入有效的数字", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_set_retry(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_set_retry(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """设置重试次数"""
         if not args:
-            await self.send_message("❌ 请提供重试次数\n\n示例: `/retry 3`", reply_to=msg_id)
+            await self.send_message("❌ 请提供重试次数\n\n示例: `/retry 3`", reply_to=msg_id, chat_id=chat_id)
             return
         
         try:
@@ -935,31 +961,31 @@ class TelegramBot:
             success, message = self.config_manager.set_retry(count)
             
             if success:
-                await self.send_message(f"✅ {message}", reply_to=msg_id)
+                await self.send_message(f"✅ {message}", reply_to=msg_id, chat_id=chat_id)
             else:
-                await self.send_message(f"❌ {message}", reply_to=msg_id)
+                await self.send_message(f"❌ {message}", reply_to=msg_id, chat_id=chat_id)
         except ValueError:
-            await self.send_message("❌ 请输入有效的数字", reply_to=msg_id)
+            await self.send_message("❌ 请输入有效的数字", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_set_concurrent(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_set_concurrent(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """设置并发线程数"""
         if not args:
-            await self.send_message("❌ 请提供并发数\n\n示例: `/concurrent 20`", reply_to=msg_id)
+            await self.send_message("❌ 请提供并发数\n\n示例: `/concurrent 20`", reply_to=msg_id, chat_id=chat_id)
             return
         
         try:
             concurrent = int(args.strip())
             if concurrent < 1 or concurrent > 100:
-                await self.send_message("❌ 并发数必须在 1-100 之间", reply_to=msg_id)
+                await self.send_message("❌ 并发数必须在 1-100 之间", reply_to=msg_id, chat_id=chat_id)
                 return
             
             self.config_manager.set('check.max_concurrent', concurrent)
             self.config_manager.save_config()
-            await self.send_message(f"✅ 并发线程数已设置为: {concurrent}", reply_to=msg_id)
+            await self.send_message(f"✅ 并发线程数已设置为: {concurrent}", reply_to=msg_id, chat_id=chat_id)
         except ValueError:
-            await self.send_message("❌ 请输入有效的数字", reply_to=msg_id)
+            await self.send_message("❌ 请输入有效的数字", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_toggle_autoadjust(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_toggle_autoadjust(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """切换自适应并发"""
         current = self.config_manager.get('check.auto_adjust_concurrent', True)
         new_value = not current
@@ -967,9 +993,9 @@ class TelegramBot:
         self.config_manager.save_config()
         
         status = "开启" if new_value else "关闭"
-        await self.send_message(f"✅ 自适应并发已{status}", reply_to=msg_id)
+        await self.send_message(f"✅ 自适应并发已{status}", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_admin(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_admin(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """管理员命令"""
         if not args:
             await self.send_message(
@@ -984,47 +1010,81 @@ class TelegramBot:
         
         parts = args.split()
         if len(parts) < 1:
-            await self.send_message("❌ 参数错误", reply_to=msg_id)
+            await self.send_message("❌ 参数错误", reply_to=msg_id, chat_id=chat_id)
             return
         
         action = parts[0].lower()
         
         if action == "list":
-            admins = self.config_manager.get('telegram.admin_users', [])
-            if not admins:
-                await self.send_message("📝 当前没有设置管理员\n\n所有人都可以执行命令", reply_to=msg_id)
+            # 获取当前群组的管理员
+            if chat_id not in self.groups_config:
+                await self.send_message("❌ 群组未配置", reply_to=msg_id, chat_id=chat_id)
+                return
+
+            group_admins = self.groups_config[chat_id].get('admins', [])
+            global_admins = self.config_manager.get('telegram.admin_users', [])
+
+            all_admins_text = ""
+            if group_admins:
+                group_list = "\n".join([f"• `{admin}`" for admin in group_admins])
+                all_admins_text += f"**当前群组管理员**:\n{group_list}\n\n"
+
+            if global_admins:
+                global_list = "\n".join([f"• `{admin}`" for admin in global_admins])
+                all_admins_text += f"**全局管理员**:\n{global_list}"
+
+            if not all_admins_text:
+                await self.send_message("📝 当前没有设置任何管理员\n\n所有人都可以执行命令", reply_to=msg_id, chat_id=chat_id)
             else:
-                admin_list = "\n".join([f"• `{admin}`" for admin in admins])
-                await self.send_message(f"👥 **管理员列表**:\n\n{admin_list}", reply_to=msg_id)
+                await self.send_message(f"👥 **管理员列表**:\n\n{all_admins_text}", reply_to=msg_id, chat_id=chat_id)
         
         elif action in ["add", "remove"]:
             if len(parts) < 2:
-                await self.send_message("❌ 请提供用户名\n\n示例: `/admin add @username`", reply_to=msg_id)
+                await self.send_message("❌ 请提供用户名\n\n示例: `/admin add @username`", reply_to=msg_id, chat_id=chat_id)
                 return
             
-            target_username = parts[1]
-            
+            target_username = parts[1].lstrip('@')  # 移除@符号
+
+            # 检查群组配置
+            if chat_id not in self.groups_config:
+                await self.send_message("❌ 群组未配置", reply_to=msg_id, chat_id=chat_id)
+                return
+
+            group_admins = self.groups_config[chat_id].get('admins', [])
+
             if action == "add":
-                success, message = self.config_manager.add_admin_by_username(target_username)
-            else:
-                success, message = self.config_manager.remove_admin_by_username(target_username)
+                if target_username in group_admins:
+                    success, message = False, f"用户 @{target_username} 已经是群组管理员"
+                else:
+                    group_admins.append(target_username)
+                    self.groups_config[chat_id]['admins'] = group_admins
+                    self.save_groups_config()
+                    success, message = True, f"已添加 @{target_username} 为群组管理员"
+            else:  # remove
+                if target_username not in group_admins:
+                    success, message = False, f"用户 @{target_username} 不是群组管理员"
+                else:
+                    group_admins.remove(target_username)
+                    self.groups_config[chat_id]['admins'] = group_admins
+                    self.save_groups_config()
+                    success, message = True, f"已移除 @{target_username} 的群组管理员权限"
             
             if success:
-                await self.send_message(f"✅ {message}", reply_to=msg_id)
+                await self.send_message(f"✅ {message}", reply_to=msg_id, chat_id=chat_id)
             else:
-                await self.send_message(f"❌ {message}", reply_to=msg_id)
+                await self.send_message(f"❌ {message}", reply_to=msg_id, chat_id=chat_id)
         
         else:
-            await self.send_message("❌ 未知的子命令", reply_to=msg_id)
+            await self.send_message("❌ 未知的子命令", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_stop(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_stop(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """停止监控 - 立即强制停止"""
         if self.stop_callback:
             # 设置停止标志，结束监听循环
             self.is_running = False
             try:
                 # 先发送停止消息
-                await self.send_message("🛑 监控服务已停止", reply_to=msg_id)
+                await self.send_message("🛑 监控服务已停止", reply_to=msg_id, chat_id=chat_id)
                 # 等待消息发送完成
                 await asyncio.sleep(0.5)
             except Exception as e:
@@ -1039,9 +1099,9 @@ class TelegramBot:
             self.logger.info("收到停止命令，程序即将退出")
             os._exit(0)  # 使用os._exit确保立即退出
         else:
-            await self.send_message("❌ 停止功能未就绪", reply_to=msg_id)
+            await self.send_message("❌ 停止功能未就绪", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_restart(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_restart(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """重启监控服务"""
         if self.restart_callback:
             await self.send_message(
@@ -1069,15 +1129,15 @@ class TelegramBot:
             # 退出码3表示需要重启
             os._exit(3)
     
-    async def cmd_reload(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_reload(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """重新加载配置"""
         if self.reload_callback:
             await self.reload_callback()
             # reload_callback 内部会发送完成消息
         else:
-            await self.send_message("❌ 重新加载功能未就绪", reply_to=msg_id)
+            await self.send_message("❌ 重新加载功能未就绪", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_update_api_key(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_update_api_key(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """更新HTTP API密钥"""
         try:
             # 生成新的安全API密钥
@@ -1106,9 +1166,9 @@ class TelegramBot:
             
         except Exception as e:
             self.logger.error(f"更新API密钥失败: {e}")
-            await self.send_message(f"❌ 更新API密钥失败: {str(e)}", reply_to=msg_id)
+            await self.send_message(f"❌ 更新API密钥失败: {str(e)}", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_set_notify_level(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_set_notify_level(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """设置通知级别"""
         if not args:
             current = self.config_manager.get('notification.level', 'smart')
@@ -1152,7 +1212,7 @@ class TelegramBot:
             reply_to=msg_id
         )
     
-    async def cmd_show_errors(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_show_errors(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """显示当前错误状态"""
         if hasattr(self, 'error_tracker_callback') and self.error_tracker_callback:
             tracker = await self.error_tracker_callback()
@@ -1161,7 +1221,7 @@ class TelegramBot:
                 ack_errors = tracker.get_acknowledged_errors()
                 
                 if not unack_errors and not ack_errors:
-                    await self.send_message("✨ **当前没有错误域名**", reply_to=msg_id)
+                    await self.send_message("✨ **当前没有错误域名**", reply_to=msg_id, chat_id=chat_id)
                     return
                 
                 # 按错误类型分组未处理错误
@@ -1276,13 +1336,13 @@ class TelegramBot:
                 message += "`/ack domain.com` - 确认处理某个错误\n"
                 message += "`/history` - 查看历史记录"
                 
-                await self.send_long_message(message, reply_to=msg_id)
+                await self.send_long_message(message, reply_to=msg_id, chat_id=chat_id)
             else:
-                await self.send_message("❌ 错误跟踪器未就绪", reply_to=msg_id)
+                await self.send_message("❌ 错误跟踪器未就绪", reply_to=msg_id, chat_id=chat_id)
         else:
-            await self.send_message("❌ 错误跟踪功能未启用", reply_to=msg_id)
+            await self.send_message("❌ 错误跟踪功能未启用", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_show_history(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_show_history(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """显示历史记录"""
         if hasattr(self, 'error_tracker_callback') and self.error_tracker_callback:
             tracker = await self.error_tracker_callback()
@@ -1336,13 +1396,13 @@ class TelegramBot:
                         status_emoji = '✅' if record.status == 'recovered' else '❌'
                         message += f"{status_emoji} {time_str} - {record.domain_name}\n"
                 
-                await self.send_message(message, reply_to=msg_id)
+                await self.send_message(message, reply_to=msg_id, chat_id=chat_id)
             else:
-                await self.send_message("❌ 错误跟踪器未就绪", reply_to=msg_id)
+                await self.send_message("❌ 错误跟踪器未就绪", reply_to=msg_id, chat_id=chat_id)
         else:
-            await self.send_message("❌ 历史记录功能未启用", reply_to=msg_id)
+            await self.send_message("❌ 历史记录功能未启用", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_acknowledge_error(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_acknowledge_error(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """确认处理错误"""
         if not args:
             await self.send_message(
@@ -1377,11 +1437,11 @@ class TelegramBot:
                         reply_to=msg_id
                     )
             else:
-                await self.send_message("❌ 错误跟踪器未就绪", reply_to=msg_id)
+                await self.send_message("❌ 错误跟踪器未就绪", reply_to=msg_id, chat_id=chat_id)
         else:
-            await self.send_message("❌ 确认功能未启用", reply_to=msg_id)
+            await self.send_message("❌ 确认功能未启用", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_daily_report(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_daily_report(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """管理每日统计报告"""
         if not args:
             # 显示当前状态
@@ -1398,7 +1458,7 @@ class TelegramBot:
             status_text += "`/dailyreport time 08:00` - 设置发送时间\n"
             status_text += "`/dailyreport now` - 立即发送今日报告"
             
-            await self.send_message(status_text, reply_to=msg_id)
+            await self.send_message(status_text, reply_to=msg_id, chat_id=chat_id)
             return
         
         parts = args.split()
@@ -1416,7 +1476,7 @@ class TelegramBot:
         elif action == "disable":
             self.config_manager.set('daily_report.enabled', False)
             self.config_manager.save_config()
-            await self.send_message("❌ 每日报告已禁用", reply_to=msg_id)
+            await self.send_message("❌ 每日报告已禁用", reply_to=msg_id, chat_id=chat_id)
         
         elif action == "time":
             if len(parts) < 2:
@@ -1439,7 +1499,7 @@ class TelegramBot:
                         reply_to=msg_id
                     )
                 else:
-                    await self.send_message("❌ 无效的时间格式", reply_to=msg_id)
+                    await self.send_message("❌ 无效的时间格式", reply_to=msg_id, chat_id=chat_id)
             except:
                 await self.send_message(
                     "❌ 无效的时间格式\n\n请使用 HH:MM 格式，如 08:00",
@@ -1451,10 +1511,10 @@ class TelegramBot:
             if self.send_daily_report_callback:
                 await self.send_daily_report_callback()
             else:
-                await self.send_message("❌ 报告功能未就绪", reply_to=msg_id)
+                await self.send_message("❌ 报告功能未就绪", reply_to=msg_id, chat_id=chat_id)
         
         else:
-            await self.send_message("❌ 未知的子命令", reply_to=msg_id)
+            await self.send_message("❌ 未知的子命令", reply_to=msg_id, chat_id=chat_id)
     
     async def listen_for_commands(self):
         """监听命令的主循环"""
@@ -1491,7 +1551,7 @@ class TelegramBot:
     
     # ==================== Cloudflare 相关命令 ====================
     
-    async def cmd_cloudflare_help(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_cloudflare_help(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """Cloudflare帮助命令"""
         help_text = """☁️ **Cloudflare 域名管理**
 
@@ -1538,9 +1598,9 @@ class TelegramBot:
 
 ⚠️ **注意**: cfsync操作采用低噪音通知策略，只在完成或出错时发送通知"""
         
-        await self.send_message(help_text, reply_to=msg_id)
+        await self.send_message(help_text, reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_manage_cf_token(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_manage_cf_token(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """管理Cloudflare Token"""
         if not args:
             await self.send_message(
@@ -1556,7 +1616,7 @@ class TelegramBot:
         
         parts = args.split()
         if len(parts) < 2:
-            await self.send_message("❌ 参数不足", reply_to=msg_id)
+            await self.send_message("❌ 参数不足", reply_to=msg_id, chat_id=chat_id)
             return
         
         action = parts[0].lower()
@@ -1564,7 +1624,7 @@ class TelegramBot:
         
         if action == "add":
             if len(parts) < 3:
-                await self.send_message("❌ 请提供API Token", reply_to=msg_id)
+                await self.send_message("❌ 请提供API Token", reply_to=msg_id, chat_id=chat_id)
                 return
             
             api_token = parts[2]
@@ -1573,9 +1633,9 @@ class TelegramBot:
             )
             
             if success:
-                await self.send_message(f"✅ {message}", reply_to=msg_id)
+                await self.send_message(f"✅ {message}", reply_to=msg_id, chat_id=chat_id)
             else:
-                await self.send_message(f"❌ {message}", reply_to=msg_id)
+                await self.send_message(f"❌ {message}", reply_to=msg_id, chat_id=chat_id)
         
         elif action == "remove":
             success, message = self.cf_manager.token_manager.remove_user_token(
@@ -1583,19 +1643,19 @@ class TelegramBot:
             )
             
             if success:
-                await self.send_message(f"✅ {message}", reply_to=msg_id)
+                await self.send_message(f"✅ {message}", reply_to=msg_id, chat_id=chat_id)
             else:
-                await self.send_message(f"❌ {message}", reply_to=msg_id)
+                await self.send_message(f"❌ {message}", reply_to=msg_id, chat_id=chat_id)
         
         else:
-            await self.send_message("❌ 无效的操作，请使用 add 或 remove", reply_to=msg_id)
+            await self.send_message("❌ 无效的操作，请使用 add 或 remove", reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_list_cf_tokens(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_list_cf_tokens(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """列出用户的Cloudflare Tokens"""
         token_list = self.cf_manager.token_manager.list_user_tokens(str(user_id))
-        await self.send_message(token_list, reply_to=msg_id)
+        await self.send_message(token_list, reply_to=msg_id, chat_id=chat_id)
     
-    async def cmd_verify_cf_token(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_verify_cf_token(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """验证Cloudflare Token"""
         if not args:
             await self.send_message(
@@ -1606,7 +1666,7 @@ class TelegramBot:
             return
         
         token_name = args.strip()
-        await self.send_message("🔄 正在验证Token...", reply_to=msg_id)
+        await self.send_message("🔄 正在验证Token...", reply_to=msg_id, chat_id=chat_id)
         
         result = await self.cf_manager.verify_user_token(str(user_id), token_name)
         
@@ -1625,7 +1685,7 @@ class TelegramBot:
                 reply_to=msg_id
             )
     
-    async def cmd_get_cf_zones(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_get_cf_zones(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """获取Cloudflare域名zones"""
         if not args:
             await self.send_message(
@@ -1636,7 +1696,7 @@ class TelegramBot:
             return
         
         token_name = args.strip()
-        await self.send_message("🔄 正在获取域名列表...", reply_to=msg_id)
+        await self.send_message("🔄 正在获取域名列表...", reply_to=msg_id, chat_id=chat_id)
         
         result = await self.cf_manager.get_user_zones(str(user_id), token_name)
         
@@ -1659,7 +1719,7 @@ class TelegramBot:
 
             zone_list += f"\n\n💡 使用 `/cfexport {token_name}` 导出所有域名"
 
-            await self.send_long_message(zone_list, reply_to=msg_id)
+            await self.send_long_message(zone_list, reply_to=msg_id, chat_id=chat_id)
         else:
             await self.send_message(
                 f"❌ **获取域名失败**\n\n"
@@ -1667,7 +1727,7 @@ class TelegramBot:
                 reply_to=msg_id
             )
     
-    async def cmd_export_cf_domains(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_export_cf_domains(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """导出单个Token的Cloudflare域名"""
         if not args:
             await self.send_message(
@@ -1684,7 +1744,7 @@ class TelegramBot:
         format_type = parts[1] if len(parts) > 1 and parts[1] in ["txt", "json", "csv"] else None
         sync_delete = "sync" in parts
         
-        await self.send_message("🔄 正在导出域名，请稍候...", reply_to=msg_id)
+        await self.send_message("🔄 正在导出域名，请稍候...", reply_to=msg_id, chat_id=chat_id)
         
         result = await self.cf_manager.export_single_token_domains(
             str(user_id), token_name, format_type, sync_delete
@@ -1717,7 +1777,7 @@ class TelegramBot:
             response += f"• `/cfsync {token_name}` - 同步到监控配置\n"
             response += f"• `/cfexportall` - 导出所有Token域名"
             
-            await self.send_message(response, reply_to=msg_id)
+            await self.send_message(response, reply_to=msg_id, chat_id=chat_id)
         else:
             await self.send_message(
                 f"❌ **导出失败**\n\n"
@@ -1725,7 +1785,7 @@ class TelegramBot:
                 reply_to=msg_id
             )
     
-    async def cmd_export_all_cf_domains(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_export_all_cf_domains(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """导出用户所有Token的域名（合并）"""
         parts = args.split() if args else []
         format_type = None
@@ -1747,7 +1807,7 @@ class TelegramBot:
         
         if merge_to_config:
             # 合并到配置模式
-            await self.send_message(f"🔄 正在导出所有Token域名并{merge_mode}到配置中...", reply_to=msg_id)
+            await self.send_message(f"🔄 正在导出所有Token域名并{merge_mode}到配置中...", reply_to=msg_id, chat_id=chat_id)
             
             # 不发送进度通知，只记录错误
             async def progress_callback(domain: str, added_count: int, total_processed: int):
@@ -1760,7 +1820,7 @@ class TelegramBot:
             )
         else:
             # 原来的导出到文件模式
-            await self.send_message("🔄 正在导出所有Token的域名，请稍候...", reply_to=msg_id)
+            await self.send_message("🔄 正在导出所有Token的域名，请稍候...", reply_to=msg_id, chat_id=chat_id)
             
             result = await self.cf_manager.export_all_user_tokens_domains(
                 str(user_id), format_type, sync_delete
@@ -1838,7 +1898,7 @@ class TelegramBot:
             response += f"\n💡 **其他操作**:\n"
             response += f"• `/cfsync merge` - 合并所有Token到监控配置"
             
-            await self.send_message(response, reply_to=msg_id)
+            await self.send_message(response, reply_to=msg_id, chat_id=chat_id)
         else:
             await self.send_message(
                 f"❌ **导出失败**\n\n"
@@ -1846,7 +1906,7 @@ class TelegramBot:
                 reply_to=msg_id
             )
     
-    async def cmd_sync_cf_domains(self, args: str, msg_id: int, user_id: int, username: str):
+    async def cmd_sync_cf_domains(self, args: str, msg_id: int, user_id: int, username: str, chat_id: str):
         """同步CF域名到monitoring配置"""
         parts = args.split() if args else []
         
@@ -1866,7 +1926,7 @@ class TelegramBot:
             # 获取用户的token列表
             user_tokens = self.cf_manager.token_manager.get_user_tokens(str(user_id))
             if not user_tokens:
-                await self.send_message("❌ 您还没有添加任何Cloudflare Token", reply_to=msg_id)
+                await self.send_message("❌ 您还没有添加任何Cloudflare Token", reply_to=msg_id, chat_id=chat_id)
                 return
                 
             # 统一逻辑：不填token名称就使用所有token
@@ -1928,11 +1988,11 @@ class TelegramBot:
                 if len(response) > 4000:
                     response = response[:4000] + "..."
                 
-                await self.send_message(response, reply_to=msg_id)
+                await self.send_message(response, reply_to=msg_id, chat_id=chat_id)
                 
             except Exception as e:
                 self.logger.error(f"发送成功消息失败: {e}")
-                await self.send_message("✅ 域名合并操作成功完成", reply_to=msg_id)
+                await self.send_message("✅ 域名合并操作成功完成", reply_to=msg_id, chat_id=chat_id)
             
         else:
             error_msg = result.get('error', '未知错误')
