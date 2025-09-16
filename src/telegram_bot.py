@@ -155,23 +155,23 @@ class TelegramBot:
                 f"{self.api_base_url}/sendMessage",
                 json=params
             )
-                
-                if response.status_code == 200:
-                    return True
-                else:
-                    try:
-                        error_data = response.json()
-                        self.logger.error(f"发送消息失败: {response.status_code}, 详情: {error_data}")
-                    except:
-                        self.logger.error(f"发送消息失败: {response.status_code}, 响应: {response.text[:200]}")
-                    
-                    # 如果是400错误且是Markdown格式问题，尝试用纯文本重发
-                    if response.status_code == 400 and parse_mode == "Markdown":
-                        self.logger.info("尝试使用纯文本格式重新发送")
-                        return await self.send_message(text, parse_mode="", reply_to=reply_to)
-                    
-                    return False
-                    
+
+            if response.status_code == 200:
+                return True
+            else:
+                try:
+                    error_data = response.json()
+                    self.logger.error(f"发送消息失败: {response.status_code}, 详情: {error_data}")
+                except:
+                    self.logger.error(f"发送消息失败: {response.status_code}, 响应: {response.text[:200]}")
+
+                # 如果是400错误且是Markdown格式问题，尝试用纯文本重发
+                if response.status_code == 400 and parse_mode == "Markdown":
+                    self.logger.info("尝试使用纯文本格式重新发送")
+                    return await self.send_message(text, parse_mode="", reply_to=reply_to)
+
+                return False
+
         except Exception as e:
             self.logger.error(f"发送消息时出错: {e}")
             return False
@@ -216,11 +216,11 @@ class TelegramBot:
                     "timeout": 25
                 }
             )
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    if data.get("ok"):
-                        return data.get("result", [])
+
+            if response.status_code == 200:
+                data = response.json()
+                if data.get("ok"):
+                    return data.get("result", [])
             return []
             
         except Exception as e:
