@@ -29,8 +29,7 @@ class TelegramBot:
         # API 基础 URL
         self.api_base_url = f"https://api.telegram.org/bot{self.bot_token}"
 
-        # 创建专用的HTTP客户端，避免与域名检测共享连接池
-        self._http_client: Optional[httpx.AsyncClient] = None
+        # 不使用持久HTTP客户端，恢复到原始实现避免连接问题
 
         # 上次处理的更新 ID
         self.last_update_id = 0
@@ -94,22 +93,6 @@ class TelegramBot:
         self.send_daily_report_callback: Optional[Callable] = None  # 发送每日报告的回调
         self.error_tracker_callback: Optional[Callable] = None  # 获取错误跟踪器的回调
 
-    @property
-    def http_client(self) -> httpx.AsyncClient:
-        """获取HTTP客户端，延迟初始化"""
-        if self._http_client is None:
-            self._http_client = httpx.AsyncClient(
-                timeout=30,
-                limits=httpx.Limits(max_connections=5, max_keepalive_connections=2),
-                # 专用于Telegram API，避免与域名检测冲突
-            )
-        return self._http_client
-
-    async def close(self):
-        """关闭HTTP客户端"""
-        if self._http_client is not None:
-            await self._http_client.aclose()
-            self._http_client = None
     
     def set_callbacks(self, check: Optional[Callable] = None, 
                       stop: Optional[Callable] = None,
@@ -151,10 +134,11 @@ class TelegramBot:
             if reply_to:
                 params["reply_to_message_id"] = reply_to
             
-            response = await self.http_client.post(
-                f"{self.api_base_url}/sendMessage",
-                json=params
-            )
+            async with httpx.AsyncClient(timeout=10) as client:
+                response = await client.post(
+                    f"{self.api_base_url}/sendMessage",
+                    json=params
+                )
 
             if response.status_code == 200:
                 return True
@@ -209,13 +193,14 @@ class TelegramBot:
     async def get_updates(self) -> list:
         """获取新消息"""
         try:
-            response = await self.http_client.get(
-                f"{self.api_base_url}/getUpdates",
-                params={
-                    "offset": self.last_update_id + 1,
-                    "timeout": 25
-                }
-            )
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(
+                    f"{self.api_base_url}/getUpdates",
+                    params={
+                        "offset": self.last_update_id + 1,
+                        "timeout": 25
+                    }
+                )
 
             if response.status_code == 200:
                 data = response.json()
