@@ -176,9 +176,10 @@ class DomainMonitor:
             telegram_config = self.config_manager.get('telegram', {})
             notification_config = self.config_manager.get('notification', {})
             
+            notif_chat_id = telegram_config.get('chat_id')
             self.notifier = TelegramNotifier(
                 bot_token=telegram_config.get('bot_token'),
-                chat_id=telegram_config.get('chat_id')
+                chat_id=str(notif_chat_id) if notif_chat_id is not None else None
             )
             self.logger.info("Telegram 通知器初始化完成")
             
@@ -1015,7 +1016,8 @@ pause"""
         # 更新关键配置
         telegram_config = self.config_manager.get('telegram', {})
         self.bot.bot_token = telegram_config.get('bot_token')
-        self.bot.chat_id = telegram_config.get('chat_id')
+        chat_id = telegram_config.get('chat_id')
+        self.bot.chat_id = str(chat_id) if chat_id is not None else None
         self.bot.admin_users = telegram_config.get('admin_users', [])
         self.bot.api_base_url = f"https://api.telegram.org/bot{self.bot.bot_token}"
         

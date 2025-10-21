@@ -19,7 +19,7 @@ class TelegramNotifier:
             chat_id: 群组或频道 ID
         """
         self.bot_token = bot_token
-        self.chat_id = chat_id
+        self.chat_id = str(chat_id) if chat_id is not None else None
         self.logger = logging.getLogger(__name__)
         
         

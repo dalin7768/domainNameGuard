@@ -21,7 +21,8 @@ class TelegramBot:
         self.config_manager = config_manager
         self.bot_token = config_manager.get('telegram.bot_token')
         # 单群组配置
-        self.chat_id = config_manager.get('telegram.chat_id')
+        chat_id = config_manager.get('telegram.chat_id')
+        self.chat_id = str(chat_id) if chat_id is not None else None
         self.admin_users = config_manager.get('telegram.admin_users', [])
 
         self.logger = logging.getLogger(__name__)
@@ -124,27 +125,52 @@ class TelegramBot:
         if error_tracker:
             self.error_tracker_callback = error_tracker
     
+
     async def send_message(self, text: str, parse_mode: str = "Markdown",
-                          reply_to: Optional[int] = None, chat_id: Optional[str] = None) -> bool:
+                          reply_to: Optional[int] = None, chat_id: Optional[str] = None,
+                          max_length: int = 4000, disable_web_page_preview: bool = True) -> bool:
         """发送消息"""
+        target_chat_id = chat_id or self.chat_id
+
+        if not target_chat_id:
+            self.logger.error("没有配置chat_id")
+            return False
+
+        if text and len(text) > max_length:
+            return await self.send_long_message(
+                text,
+                reply_to=reply_to,
+                chat_id=target_chat_id,
+                max_length=max_length,
+                parse_mode=parse_mode,
+                disable_web_page_preview=disable_web_page_preview
+            )
+
+        return await self._send_message_raw(
+            text=text,
+            parse_mode=parse_mode,
+            reply_to=reply_to,
+            chat_id=target_chat_id,
+            disable_web_page_preview=disable_web_page_preview
+        )
+
+    async def _send_message_raw(self, text: str, parse_mode: str, reply_to: Optional[int],
+                                chat_id: str, allow_plaintext_retry: bool = True,
+                                disable_web_page_preview: bool = True) -> bool:
+        """底层发送消息，直接调用Telegram API"""
         try:
-            # 使用指定的chat_id或默认的群组chat_id
-            target_chat_id = chat_id or self.chat_id
-
-            if not target_chat_id:
-                self.logger.error("没有配置chat_id")
-                return False
-
             params = {
-                "chat_id": target_chat_id,
+                "chat_id": str(chat_id),
                 "text": text,
-                "parse_mode": parse_mode,
-                "disable_web_page_preview": True
+                "disable_web_page_preview": disable_web_page_preview
             }
-            
+
+            if parse_mode:
+                params["parse_mode"] = parse_mode
+
             if reply_to:
                 params["reply_to_message_id"] = reply_to
-            
+
             async with httpx.AsyncClient(timeout=10) as client:
                 response = await client.post(
                     f"{self.api_base_url}/sendMessage",
@@ -153,53 +179,92 @@ class TelegramBot:
 
             if response.status_code == 200:
                 return True
-            else:
-                try:
-                    error_data = response.json()
-                    self.logger.error(f"发送消息失败: {response.status_code}, 详情: {error_data}")
-                except:
-                    self.logger.error(f"发送消息失败: {response.status_code}, 响应: {response.text[:200]}")
 
-                # 如果是400错误且是Markdown格式问题，尝试用纯文本重发
-                if response.status_code == 400 and parse_mode == "Markdown":
-                    self.logger.info("尝试使用纯文本格式重新发送")
-                    return await self.send_message(text, parse_mode="", reply_to=reply_to)
+            try:
+                error_data = response.json()
+                self.logger.error(f"发送消息失败: {response.status_code}, 详情: {error_data}")
+            except Exception:
+                self.logger.error(f"发送消息失败: {response.status_code}, 响应: {response.text[:200]}")
 
-                return False
+            if (response.status_code == 400 and parse_mode == "Markdown" and allow_plaintext_retry):
+                self.logger.info("尝试使用纯文本格式重新发送")
+                return await self._send_message_raw(
+                    text=text,
+                    parse_mode="",
+                    reply_to=reply_to,
+                    chat_id=chat_id,
+                    allow_plaintext_retry=False,
+                    disable_web_page_preview=disable_web_page_preview
+                )
+
+            return False
 
         except Exception as e:
             self.logger.error(f"发送消息时出错: {e}")
             return False
 
-    async def send_long_message(self, text: str, reply_to: Optional[int] = None, chat_id: Optional[str] = None, max_length: int = 4000):
+    async def send_long_message(self, text: str, reply_to: Optional[int] = None,
+                               chat_id: Optional[str] = None, max_length: int = 4000,
+                               parse_mode: str = "Markdown",
+                               disable_web_page_preview: bool = True) -> bool:
         """发送长消息，如果超过限制则分段发送"""
+        if not text:
+            return True
+
+        target_chat_id = chat_id or self.chat_id
+
+        if not target_chat_id:
+            self.logger.error("没有配置chat_id")
+            return False
+
+        max_length = max_length or 4000
+
         if len(text) <= max_length:
-            await self.send_message(text, reply_to=reply_to, chat_id=chat_id)
-            return
+            return await self._send_message_raw(
+                text=text,
+                parse_mode=parse_mode,
+                reply_to=reply_to,
+                chat_id=target_chat_id,
+                disable_web_page_preview=disable_web_page_preview
+            )
 
-        # 分割消息
-        parts = []
-        current = ""
-        lines = text.split('\n')
+        segments = []
+        start = 0
+        total_length = len(text)
 
-        for line in lines:
-            # 如果当前行加上这一行超过限制
-            if len(current) + len(line) + 1 > max_length:
-                if current.strip():  # 只有当current不为空时才添加
-                    parts.append(current.strip())
-                current = line + '\n'
-            else:
-                current += line + '\n'
+        while start < total_length:
+            end = min(start + max_length, total_length)
+            if end < total_length:
+                split_pos = text.rfind('\n', start, end)
+                if split_pos > start:
+                    end = split_pos + 1
 
-        # 添加最后一部分
-        if current.strip():
-            parts.append(current.strip())
+            segment = text[start:end].rstrip('\n')
+            if not segment:
+                segment = text[start:min(start + max_length, total_length)]
+                end = start + len(segment)
 
-        # 发送所有部分
-        for i, part in enumerate(parts):
-            # 为第一条消息添加reply_to，后续消息不用
-            reply_to_use = reply_to if i == 0 else None
-            await self.send_message(part, reply_to=reply_to_use, chat_id=chat_id)
+            segments.append(segment)
+            start = end
+
+        segments = [segment for segment in segments if segment]
+
+        success = True
+        for index, part in enumerate(segments):
+            part_reply_to = reply_to if index == 0 else None
+            sent = await self._send_message_raw(
+                text=part,
+                parse_mode=parse_mode,
+                reply_to=part_reply_to,
+                chat_id=target_chat_id,
+                disable_web_page_preview=disable_web_page_preview
+            )
+            if not sent:
+                success = False
+                break
+
+        return success
+
 
     async def get_updates(self) -> list:
         """获取新消息"""
